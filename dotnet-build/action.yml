@@ -1,0 +1,57 @@
+name: .NET Build & Test
+description: "Restore, build, test and publish a .NET project"
+
+inputs:
+  dotnet-version:
+    description: ".NET SDK version"
+    required: false
+    default: "9.0.x"
+  project-path:
+    description: "Path to .csproj or solution"
+    required: false
+    default: "."
+  run-tests:
+    description: "Whether to run tests"
+    required: false
+    default: "true"
+  publish-output:
+    description: "Output folder for dotnet publish"
+    required: false
+    default: "./publish"
+
+outputs:
+  artifact-name:
+    description: "Name of the uploaded artifact"
+    value: ${{ steps.upload.outputs.artifact-name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ inputs.dotnet-version }}
+
+    - name: Restore
+      shell: bash
+      run: dotnet restore ${{ inputs.project-path }}
+
+    - name: Build
+      shell: bash
+      run: dotnet build ${{ inputs.project-path }} --no-restore --configuration Release
+
+    - name: Test
+      if: ${{ inputs.run-tests == 'true' }}
+      shell: bash
+      run: dotnet test ${{ inputs.project-path }} --no-build --configuration Release --logger trx
+
+    - name: Publish
+      shell: bash
+      run: dotnet publish ${{ inputs.project-path }} --no-build --configuration Release --output ${{ inputs.publish-output }}
+
+    - name: Upload artifact
+      id: upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: dotnet-publish
+        path: ${{ inputs.publish-output }}

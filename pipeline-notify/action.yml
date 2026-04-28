@@ -1,0 +1,64 @@
+name: Resolve Status & Notify Slack
+description: "Derives overall pipeline status from job results and sends a Slack notification"
+
+inputs:
+  build-result:
+    description: "Result of the build job (success|failure|cancelled|skipped)"
+    required: true
+  docker-result:
+    description: "Result of the docker job (success|failure|cancelled|skipped)"
+    required: true
+  webhook-url:
+    description: "Slack Incoming Webhook URL"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve overall status
+      id: resolve
+      shell: bash
+      run: |
+        BUILD="${{ inputs.build-result }}"
+        DOCKER="${{ inputs.docker-result }}"
+        if [[ "$BUILD" == "success" && ("$DOCKER" == "success" || "$DOCKER" == "skipped") ]]; then
+          echo "status=success" >> "$GITHUB_OUTPUT"
+        elif [[ "$BUILD" == "cancelled" || "$DOCKER" == "cancelled" ]]; then
+          echo "status=cancelled" >> "$GITHUB_OUTPUT"
+        else
+          echo "status=failure" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Send Slack notification
+      shell: bash
+      run: |
+        STATUS="${{ steps.resolve.outputs.status }}"
+        case "$STATUS" in
+          success)   EMOJI=":white_check_mark:" ; COLOR="good"   ;;
+          failure)   EMOJI=":x:"               ; COLOR="danger"  ;;
+          cancelled) EMOJI=":warning:"          ; COLOR="warning" ;;
+          *)         EMOJI=":information_source:"; COLOR="#ccc"   ;;
+        esac
+
+        PAYLOAD=$(printf '{
+          "text": "%s *%s* — %s",
+          "attachments": [{
+            "color": "%s",
+            "fields": [
+              {"title":"Workflow","value":"%s","short":true},
+              {"title":"Branch",  "value":"%s","short":true},
+              {"title":"Build",   "value":"%s","short":true},
+              {"title":"Docker",  "value":"%s","short":true}
+            ]
+          }]
+        }' \
+          "$EMOJI" "$GITHUB_REPOSITORY" "$STATUS" "$COLOR" \
+          "$GITHUB_WORKFLOW" "$GITHUB_REF_NAME" \
+          "${{ inputs.build-result }}" "${{ inputs.docker-result }}"
+        )
+
+        curl -s -X POST \
+          -H "Content-Type: application/json" \
+          -d "$PAYLOAD" \
+          "${{ inputs.webhook-url }}" \
+          || echo "Slack notification failed (non-blocking)"
