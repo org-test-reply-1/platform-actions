@@ -1,6 +1,0 @@
-name: Test Composite
-runs:
-  using: "composite"
-  steps:
-    - run: echo "la pipeline è runnata"
-      shell: bash
