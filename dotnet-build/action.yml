@@ -5,7 +5,7 @@ inputs:
   dotnet-channel:
     description: ".NET channel to install (e.g. 9.0, 8.0)"
     required: false
-    default: "9.0"
+    default: "10.0"
   project-path:
     description: "Path to .csproj or solution"
     required: false
