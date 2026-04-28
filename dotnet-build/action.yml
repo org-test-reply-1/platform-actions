@@ -27,12 +27,12 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install .NET
-      shell: bash
-      run: |
-        curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel ${{ inputs.dotnet-channel }}
-        echo "$HOME/.dotnet" >> $GITHUB_PATH
-        echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
+ #   - name: Install .NET
+ #     shell: bash
+ #     run: |
+ #       curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel ${{ inputs.dotnet-channel }}
+ #       echo "$HOME/.dotnet" >> $GITHUB_PATH
+ #       echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
 
     - name: Restore
       shell: bash
