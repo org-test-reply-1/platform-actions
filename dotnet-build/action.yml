@@ -2,10 +2,6 @@ name: .NET Build & Test
 description: "Restore, build, test and publish a .NET project"
 
 inputs:
-  dotnet-version:
-    description: ".NET SDK version"
-    required: false
-    default: "9.0.x"
   project-path:
     description: "Path to .csproj or solution"
     required: false
@@ -27,11 +23,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Install .NET SDK
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: ${{ inputs.dotnet-version }}
-
     - name: Restore
       shell: bash
       run: dotnet restore ${{ inputs.project-path }}
