@@ -2,6 +2,10 @@ name: .NET Build & Test
 description: "Restore, build, test and publish a .NET project"
 
 inputs:
+  dotnet-channel:
+    description: ".NET channel to install (e.g. 9.0, 8.0)"
+    required: false
+    default: "9.0"
   project-path:
     description: "Path to .csproj or solution"
     required: false
@@ -23,6 +27,13 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Install .NET
+      shell: bash
+      run: |
+        curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel ${{ inputs.dotnet-channel }}
+        echo "$HOME/.dotnet" >> $GITHUB_PATH
+        echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
+
     - name: Restore
       shell: bash
       run: dotnet restore ${{ inputs.project-path }}
