@@ -1,83 +1,136 @@
-name: Docker Build & Push
-description: "Build a Docker image and push it to a registry (dry-run by default)"
+name: Docker Build & Push (ARC Runner)
+description: >
+  Costruisce e pubblica la custom runner image su GitHub Container Registry.
+  Autentica su GHCR tramite GitHub App (nessun PAT o GITHUB_TOKEN).
+  Usata dalla pipeline ARC per aggiornare l'immagine dei pod runner su AKS.
 
 inputs:
-  image-name:
-    description: "Image name, e.g. myorg/myapp"
-    required: true
   registry:
-    description: "Container registry host"
+    description: "Container registry (default: ghcr.io)"
     required: false
     default: "ghcr.io"
-  dockerfile:
-    description: "Path to Dockerfile"
-    required: false
-    default: "./Dockerfile"
-  context:
-    description: "Docker build context"
-    required: false
-    default: "."
-  registry-username:
-    description: "Registry username"
+
+  image_name:
+    description: "Nome completo dell'immagine (es: org/aks-arc-runner)"
     required: true
-  registry-password:
-    description: "Registry password / token"
-    required: true
-  dry-run:
-    description: "Skip actual push (true/false)"
+
+  image_tag:
+    description: "Tag immagine. Se vuoto viene usato il SHA del commit."
     required: false
-    default: "true"
+    default: ""
+
+  dockerfile_path:
+    description: "Percorso del Dockerfile"
+    required: false
+    default: "./arc-runner-image/Dockerfile"
+
+  context_path:
+    description: "Build context Docker"
+    required: false
+    default: "./arc-runner-image"
+
+  app_id:
+    description: "GitHub App ID (Organization Secret)"
+    required: true
+
+  app_private_key:
+    description: "GitHub App private key PEM (Organization Secret)"
+    required: true
+
+  app_installation_id:
+    description: "GitHub App installation ID (Organization Secret)"
+    required: true
 
 outputs:
-  full-tag:
-    description: "Full image:tag that was built"
-    value: ${{ steps.tag.outputs.full-tag }}
+  image_full_tag:
+    description: "Tag completo dell'immagine pubblicata (registry/image:tag)"
+    value: ${{ steps.meta.outputs.tags }}
+
+  image_digest:
+    description: "Digest SHA dell'immagine pubblicata"
+    value: ${{ steps.push.outputs.digest }}
 
 runs:
   using: composite
   steps:
-    - name: Compute tag
-      id: tag
-      shell: bash
-      run: |
-        SHORT_SHA="${GITHUB_SHA::7}"
-        REF_SLUG="${GITHUB_REF_NAME//\//-}"
-        FULL_TAG="${{ inputs.registry }}/${{ inputs.image-name }}:${REF_SLUG}-${SHORT_SHA}"
-        echo "full-tag=${FULL_TAG}" >> "$GITHUB_OUTPUT"
+    # ------------------------------------------------------------------ #
+    # 1. Genera un token di installazione dalla GitHub App.
+    #    Il token ha scope packages:write sul registry e scade dopo 1 ora.
+    # ------------------------------------------------------------------ #
+    - name: Genera token GitHub App
+      id: app-token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ inputs.app_id }}
+        private-key: ${{ inputs.app_private_key }}
+        installation-id: ${{ inputs.app_installation_id }}
 
-    - name: Login to registry
+    # ------------------------------------------------------------------ #
+    # 2. Calcola il tag finale (input esplicito oppure SHA commit breve)
+    # ------------------------------------------------------------------ #
+    - name: Calcola tag immagine
+      id: meta
       shell: bash
       run: |
-        if [ "${{ inputs.dry-run }}" = "true" ]; then
-          echo "[DRY-RUN] Skipping login to ${{ inputs.registry }}"
-        else
-          echo "${{ inputs.registry-password }}" | \
-            docker login ${{ inputs.registry }} -u "${{ inputs.registry-username }}" --password-stdin
+        TAG="${{ inputs.image_tag }}"
+        if [ -z "$TAG" ]; then
+          TAG="${{ github.sha }}"
+          TAG="${TAG:0:7}"
         fi
+        FULL="${{ inputs.registry }}/${{ inputs.image_name }}:${TAG}"
+        echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+        echo "tags=${FULL}" >> "$GITHUB_OUTPUT"
+        echo "Image che verrà pubblicata: ${FULL}"
 
-    - name: Build image
+    # ------------------------------------------------------------------ #
+    # 3. Login a GHCR con il token generato dalla GitHub App
+    # ------------------------------------------------------------------ #
+    - name: Login a ${{ inputs.registry }}
+      shell: bash
+      run: |
+        echo "${{ steps.app-token.outputs.token }}" \
+          | docker login ${{ inputs.registry }} \
+              --username x-access-token \
+              --password-stdin
+
+    # ------------------------------------------------------------------ #
+    # 4. Build
+    # ------------------------------------------------------------------ #
+    - name: Docker build
       shell: bash
       run: |
         docker build \
-          -f ${{ inputs.dockerfile }} \
-          -t ${{ steps.tag.outputs.full-tag }} \
-          ${{ inputs.context }}
-        echo "Built: ${{ steps.tag.outputs.full-tag }}"
+          --file ${{ inputs.dockerfile_path }} \
+          --tag ${{ steps.meta.outputs.tags }} \
+          --label "org.opencontainers.image.source=${{ github.repositoryUrl }}" \
+          --label "org.opencontainers.image.revision=${{ github.sha }}" \
+          --label "org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}" \
+          ${{ inputs.context_path }}
 
-    - name: Push image
+    # ------------------------------------------------------------------ #
+    # 5. Push e recupero digest
+    # ------------------------------------------------------------------ #
+    - name: Docker push
+      id: push
       shell: bash
       run: |
-        if [ "${{ inputs.dry-run }}" = "true" ]; then
-          echo "[DRY-RUN] Would push: ${{ steps.tag.outputs.full-tag }}"
-        else
-          docker push ${{ steps.tag.outputs.full-tag }}
-        fi
+        docker push ${{ steps.meta.outputs.tags }}
 
-    - name: Write job summary
+        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' \
+          ${{ steps.meta.outputs.tags }} 2>/dev/null \
+          || docker image inspect --format='{{.Id}}' ${{ steps.meta.outputs.tags }})
+        echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+        echo "Digest: ${DIGEST}"
+
+    # ------------------------------------------------------------------ #
+    # 6. Summary nel job log
+    # ------------------------------------------------------------------ #
+    - name: Summary
       shell: bash
       run: |
-        echo "### Docker Build" >> $GITHUB_STEP_SUMMARY
-        echo "| | |" >> $GITHUB_STEP_SUMMARY
-        echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-        echo "| Image | \`${{ steps.tag.outputs.full-tag }}\` |" >> $GITHUB_STEP_SUMMARY
-        echo "| Push  | ${{ inputs.dry-run == 'true' && 'dry-run' || 'pushed' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "### Docker Build & Push completato" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Campo | Valore |" >> "$GITHUB_STEP_SUMMARY"
+        echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Immagine | \`${{ steps.meta.outputs.tags }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Digest | \`${{ steps.push.outputs.digest }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
