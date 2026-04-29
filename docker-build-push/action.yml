@@ -54,6 +54,18 @@ runs:
   using: composite
   steps:
     # ------------------------------------------------------------------ #
+    # 1. Genera un token di installazione dalla GitHub App.
+    #    Il token ha scope packages:write sul registry e scade dopo 1 ora.
+    # ------------------------------------------------------------------ #
+    - name: Genera token GitHub App
+      id: app-token
+      uses: actions/create-github-app-token@v1
+      with:
+        app-id: ${{ inputs.app_id }}
+        private-key: ${{ inputs.app_private_key }}
+        installation-id: ${{ inputs.app_installation_id }}
+
+    # ------------------------------------------------------------------ #
     # 2. Calcola il tag finale (input esplicito oppure SHA commit breve)
     # ------------------------------------------------------------------ #
     - name: Calcola tag immagine
