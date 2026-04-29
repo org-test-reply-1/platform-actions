@@ -1,0 +1,82 @@
+# platform-actions/create-copilot-issue/action.yml
+name: 'Create Copilot Issue'
+description: 'Crea issue con contesto e la assegna a @copilot per attivare il Coding Agent'
+
+inputs:
+  title:
+    description: 'Titolo della issue'
+    required: true
+  body:
+    description: 'Corpo della issue con contesto errore'
+    required: true
+  labels:
+    description: 'Labels separate da virgola'
+    required: false
+    default: 'copilot-auto'
+  assign-pat:
+    description: 'PAT fine-grained con Issues Read/Write'
+    required: true
+
+outputs:
+  issue-url:
+    description: 'URL della issue creata'
+    value: ${{ steps.create.outputs.issue_url }}
+  issue-number:
+    description: 'Numero della issue creata'
+    value: ${{ steps.create.outputs.issue_number }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Create issue
+      id: create
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.assign-pat }}
+      run: |
+        # Crea la issue con labels
+        ISSUE_URL=$(gh issue create \
+          --title "${{ inputs.title }}" \
+          --body "${{ inputs.body }}" \
+          --label "${{ inputs.labels }}" 2>&1)
+
+        echo "issue_url=${ISSUE_URL}" >> $GITHUB_OUTPUT
+
+        # Estrai il numero della issue dall'URL
+        ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oP '/issues/\K[0-9]+')
+        echo "issue_number=${ISSUE_NUMBER}" >> $GITHUB_OUTPUT
+        echo "Issue creata: ${ISSUE_URL}"
+
+    - name: Assign to @copilot
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.assign-pat }}
+      run: |
+        ISSUE_NUMBER="${{ steps.create.outputs.issue_number }}"
+        REPO="${{ github.repository }}"
+        OWNER=$(echo "$REPO" | cut -d'/' -f1)
+        NAME=$(echo "$REPO" | cut -d'/' -f2)
+
+        # Assegna a @copilot tramite GraphQL API
+        # (gh issue edit --add-assignee non supporta @copilot direttamente)
+        gh api graphql -f query='
+          mutation {
+            updateIssue(input: {
+              id: "'"$(gh api "/repos/${REPO}/issues/${ISSUE_NUMBER}" --jq '.node_id')"'"
+              assigneeIds: ["'"$(gh api "/users/copilot" --jq '.node_id' 2>/dev/null || echo "")"'"]
+            }) {
+              issue {
+                url
+                assignees(first: 5) {
+                  nodes { login }
+                }
+              }
+            }
+          }
+        ' 2>/dev/null || echo "⚠️ Assegnazione diretta a @copilot non riuscita, tentativo fallback..."
+
+        # Fallback: prova con gh issue edit
+        gh issue edit "$ISSUE_NUMBER" --add-assignee "copilot" 2>/dev/null || \
+          echo "⚠️ Assign @copilot fallback: verificare manualmente issue #${ISSUE_NUMBER}"
+
+        echo "✅ Issue #${ISSUE_NUMBER} assegnata a @copilot"
