@@ -63,7 +63,7 @@ runs:
       with:
         app-id: ${{ inputs.app_id }}
         private-key: ${{ inputs.app_private_key }}
-        installation-id: ${{ inputs.app_installation_id }}
+        #installation-id: ${{ inputs.app_installation_id }}
 
     # ------------------------------------------------------------------ #
     # 2. Calcola il tag finale (input esplicito oppure SHA commit breve)
