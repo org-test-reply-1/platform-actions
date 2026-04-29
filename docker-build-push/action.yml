@@ -60,18 +60,6 @@ runs:
       env: 
         APP_ID: ${{ inputs.app_id }}
     # ------------------------------------------------------------------ #
-    # 1. Genera un token di installazione dalla GitHub App.
-    #    Il token ha scope packages:write sul registry e scade dopo 1 ora.
-    # ------------------------------------------------------------------ #
-    - name: Genera token GitHub App
-      id: app-token
-      uses: actions/create-github-app-token@v1
-      with:
-        app-id: ${{ inputs.app_id }}
-        private-key: ${{ inputs.app_private_key }}
-        #installation-id: ${{ inputs.app_installation_id }}
-
-    # ------------------------------------------------------------------ #
     # 2. Calcola il tag finale (input esplicito oppure SHA commit breve)
     # ------------------------------------------------------------------ #
     - name: Calcola tag immagine
@@ -91,13 +79,13 @@ runs:
     # ------------------------------------------------------------------ #
     # 3. Login a GHCR con il token generato dalla GitHub App
     # ------------------------------------------------------------------ #
-    - name: Login a ${{ inputs.registry }}
+    - name: Login a ghcr.io
       shell: bash
       run: |
-        echo "${{ steps.app-token.outputs.token }}" \
-          | docker login ${{ inputs.registry }} \
-              --username x-access-token \
-              --password-stdin
+        echo "${{ github.token }}" \
+          | docker login ghcr.io \
+            --username ${{ github.actor }} \
+            --password-stdin
 
     # ------------------------------------------------------------------ #
     # 4. Build
