@@ -53,6 +53,12 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Debug inputs
+      shell: bash
+      run: |
+        echo "app_id length: ${#APP_ID}"
+      env: 
+        APP_ID: ${{ inputs.app_id }}
     # ------------------------------------------------------------------ #
     # 1. Genera un token di installazione dalla GitHub App.
     #    Il token ha scope packages:write sul registry e scade dopo 1 ora.
