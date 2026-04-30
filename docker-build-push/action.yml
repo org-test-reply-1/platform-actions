@@ -1,50 +1,38 @@
 name: Docker Build & Push (ARC Runner)
 description: >
-  Costruisce e pubblica la custom runner image su GitHub Container Registry.
-  Autentica su GHCR tramite GitHub App (nessun PAT o GITHUB_TOKEN).
-  Usata dalla pipeline ARC per aggiornare l'immagine dei pod runner su AKS.
+  Costruisce e pubblica la custom runner image su GHCR con tag semver.
 
 inputs:
   registry:
-    description: "Container registry (default: ghcr.io)"
+    description: "Container registry"
     required: false
     default: "ghcr.io"
 
   image_name:
-    description: "Nome completo dell'immagine (es: org/aks-arc-runner)"
+    description: "Nome immagine (es: org/aks-arc-runner)"
     required: true
 
-  image_tag:
-    description: "Tag immagine. Se vuoto viene usato il SHA del commit."
+  version:
+    description: "Versione semver (es: 1.2.3). Se vuoto viene auto-incrementata la patch dall'ultima tag Git."
     required: false
     default: ""
 
   dockerfile_path:
-    description: "Percorso del Dockerfile"
     required: false
     default: "./arc-runner-image/Dockerfile"
 
   context_path:
-    description: "Build context Docker"
     required: false
     default: "./arc-runner-image"
 
-  app_id:
-    description: "GitHub App ID (Organization Secret)"
-    required: true
-
-  app_private_key:
-    description: "GitHub App private key PEM (Organization Secret)"
-    required: true
-
-  app_installation_id:
-    description: "GitHub App installation ID (Organization Secret)"
-    required: true
-
 outputs:
   image_full_tag:
-    description: "Tag completo dell'immagine pubblicata (registry/image:tag)"
-    value: ${{ steps.meta.outputs.tags }}
+    description: "Tag completo pubblicato (registry/image:tag)"
+    value: ${{ steps.meta.outputs.full_tag }}
+
+  version:
+    description: "Versione semver usata (es: 1.2.3)"
+    value: ${{ steps.meta.outputs.version }}
 
   image_digest:
     description: "Digest SHA dell'immagine pubblicata"
@@ -54,76 +42,102 @@ runs:
   using: composite
   steps:
     # ------------------------------------------------------------------ #
-    # 1. Genera un token di installazione dalla GitHub App.
-    #    Il token ha scope packages:write sul registry e scade dopo 1 ora.
+    # 1. Calcola versione semver
+    #    - Se l'input version è fornito, lo usa direttamente
+    #    - Altrimenti legge l'ultima tag Git (vX.Y.Z) e incrementa la patch
+    #    - Se non esistono tag, parte da 0.1.0
     # ------------------------------------------------------------------ #
-    - name: Genera token GitHub App
-      id: app-token
-      uses: actions/create-github-app-token@v1
-      with:
-        app-id: ${{ inputs.app_id }}
-        private-key: ${{ inputs.app_private_key }}
-        installation-id: ${{ inputs.app_installation_id }}
-
-    # ------------------------------------------------------------------ #
-    # 2. Calcola il tag finale (input esplicito oppure SHA commit breve)
-    # ------------------------------------------------------------------ #
-    - name: Calcola tag immagine
+    - name: Calcola versione semver
       id: meta
       shell: bash
       run: |
-        TAG="${{ inputs.image_tag }}"
-        if [ -z "$TAG" ]; then
-          TAG="${{ github.sha }}"
-          TAG="${TAG:0:7}"
+        INPUT_VERSION="${{ inputs.version }}"
+
+        if [ -n "$INPUT_VERSION" ]; then
+          # Usa la versione passata esplicitamente (strip del prefisso v se presente)
+          VERSION="${INPUT_VERSION#v}"
+        else
+          # Leggi l'ultima tag Git semver
+          LAST_TAG=$(git tag --list 'v*.*.*' --sort=-version:refname | head -1)
+
+          if [ -z "$LAST_TAG" ]; then
+            VERSION="0.1.0"
+          else
+            # Estrai major minor patch e incrementa patch
+            MAJOR=$(echo "$LAST_TAG" | sed 's/v\([0-9]*\)\..*/\1/')
+            MINOR=$(echo "$LAST_TAG" | sed 's/v[0-9]*\.\([0-9]*\)\..*/\1/')
+            PATCH=$(echo "$LAST_TAG" | sed 's/v[0-9]*\.[0-9]*\.\([0-9]*\).*/\1/')
+            PATCH=$((PATCH + 1))
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          fi
         fi
-        FULL="${{ inputs.registry }}/${{ inputs.image_name }}:${TAG}"
-        echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-        echo "tags=${FULL}" >> "$GITHUB_OUTPUT"
-        echo "Image che verrà pubblicata: ${FULL}"
+
+        FULL="${{ inputs.registry }}/${{ inputs.image_name }}:${VERSION}"
+        FULL_LATEST="${{ inputs.registry }}/${{ inputs.image_name }}:latest"
+
+        echo "version=${VERSION}"       >> "$GITHUB_OUTPUT"
+        echo "full_tag=${FULL}"         >> "$GITHUB_OUTPUT"
+        echo "full_latest=${FULL_LATEST}" >> "$GITHUB_OUTPUT"
+        echo "Versione: ${VERSION}"
+        echo "Tag: ${FULL}"
 
     # ------------------------------------------------------------------ #
-    # 3. Login a GHCR con il token generato dalla GitHub App
+    # 2. Login a GHCR
     # ------------------------------------------------------------------ #
-    - name: Login a ${{ inputs.registry }}
+    - name: Login a ghcr.io
       shell: bash
       run: |
-        echo "${{ steps.app-token.outputs.token }}" \
-          | docker login ${{ inputs.registry }} \
-              --username x-access-token \
-              --password-stdin
+        echo "${{ github.token }}" | docker login ghcr.io \
+          --username ${{ github.actor }} \
+          --password-stdin
 
     # ------------------------------------------------------------------ #
-    # 4. Build
+    # 3. Build — tagga sia versione che latest
     # ------------------------------------------------------------------ #
     - name: Docker build
       shell: bash
       run: |
         docker build \
           --file ${{ inputs.dockerfile_path }} \
-          --tag ${{ steps.meta.outputs.tags }} \
+          --tag ${{ steps.meta.outputs.full_tag }} \
+          --tag ${{ steps.meta.outputs.full_latest }} \
           --label "org.opencontainers.image.source=${{ github.repositoryUrl }}" \
           --label "org.opencontainers.image.revision=${{ github.sha }}" \
-          --label "org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}" \
+          --label "org.opencontainers.image.version=${{ steps.meta.outputs.version }}" \
+          --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
           ${{ inputs.context_path }}
 
     # ------------------------------------------------------------------ #
-    # 5. Push e recupero digest
+    # 4. Push — pusha sia versione che latest
     # ------------------------------------------------------------------ #
     - name: Docker push
       id: push
       shell: bash
       run: |
-        docker push ${{ steps.meta.outputs.tags }}
+        docker push ${{ steps.meta.outputs.full_tag }}
+        docker push ${{ steps.meta.outputs.full_latest }}
 
-        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' \
-          ${{ steps.meta.outputs.tags }} 2>/dev/null \
-          || docker image inspect --format='{{.Id}}' ${{ steps.meta.outputs.tags }})
+        DIGEST=$(docker inspect \
+          --format='{{index .RepoDigests 0}}' \
+          ${{ steps.meta.outputs.full_tag }} 2>/dev/null \
+          || docker image inspect \
+          --format='{{.Id}}' \
+          ${{ steps.meta.outputs.full_tag }})
         echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
-        echo "Digest: ${DIGEST}"
 
     # ------------------------------------------------------------------ #
-    # 6. Summary nel job log
+    # 5. Crea tag Git per la versione pushata
+    # ------------------------------------------------------------------ #
+    - name: Crea tag Git
+      shell: bash
+      run: |
+        git config user.name  "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag "v${{ steps.meta.outputs.version }}" || echo "Tag già esistente, skip"
+        git push origin "v${{ steps.meta.outputs.version }}" || echo "Push tag fallito, skip"
+
+    # ------------------------------------------------------------------ #
+    # 6. Summary
     # ------------------------------------------------------------------ #
     - name: Summary
       shell: bash
@@ -131,6 +145,8 @@ runs:
         echo "### Docker Build & Push completato" >> "$GITHUB_STEP_SUMMARY"
         echo "| Campo | Valore |" >> "$GITHUB_STEP_SUMMARY"
         echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Immagine | \`${{ steps.meta.outputs.tags }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Versione | \`${{ steps.meta.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Immagine | \`${{ steps.meta.outputs.full_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Latest | \`${{ steps.meta.outputs.full_latest }}\` |" >> "$GITHUB_STEP_SUMMARY"
         echo "| Digest | \`${{ steps.push.outputs.digest }}\` |" >> "$GITHUB_STEP_SUMMARY"
         echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
