@@ -26,6 +26,10 @@ runs:
         git config --global user.email "github-actions@github.com"
         git config --global user.name "GitHub Actions"
 
+    - name: Fetch all tags
+      shell: bash
+      run: git fetch --tags --force
+
     - name: Check git status
       shell: bash
       run: |
