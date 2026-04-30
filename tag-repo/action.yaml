@@ -1,0 +1,65 @@
+name: Tag Repo (SemVer)
+description: >
+  Composite action that creates a git tag using the semantic versioning standard (major.minor.patch) from the current commit.
+  Automatically increments the patch, creates and pushes the tag.
+
+inputs:
+  tag_prefix:
+    description: "Optional prefix for the tag (e.g. v)"
+    required: false
+    default: ""
+
+outputs:
+  tag:
+    description: "Created tag"
+    value: ${{ steps.semver.outputs.tag }}
+  version:
+    description: "Created semver version"
+    value: ${{ steps.semver.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check git status
+      shell: bash
+      run: |
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "Error: working directory is not clean."
+          exit 1
+        fi
+
+    - name: Calculate next semver tag
+      id: semver
+      shell: bash
+      run: |
+        set -e
+        PREFIX="${{ inputs.tag_prefix }}"
+        # Find the latest valid semver tag
+        LAST_TAG=$(git tag --list "${PREFIX}[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n1)
+        if [ -z "$LAST_TAG" ]; then
+          VERSION="0.1.0"
+        else
+          # Remove prefix
+          RAW_TAG=${LAST_TAG#$PREFIX}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$RAW_TAG"
+          PATCH=$((PATCH + 1))
+          VERSION="$MAJOR.$MINOR.$PATCH"
+        fi
+        TAG="$PREFIX$VERSION"
+        echo "Previous tag: $LAST_TAG"
+        echo "New tag: $TAG"
+        echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+    - name: Create and push tag
+      shell: bash
+      run: |
+        git tag -a "${{ steps.semver.outputs.tag }}" -m "Release ${{ steps.semver.outputs.tag }}"
+        git push origin "${{ steps.semver.outputs.tag }}"
+
+    - name: Summary
+      shell: bash
+      run: |
+        echo "### Tag created: \`${{ steps.semver.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Version: \`${{ steps.semver.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+        echo "- Commit: \`$(git rev-parse --short HEAD)\`" >> "$GITHUB_STEP_SUMMARY"
