@@ -20,6 +20,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Set git user
+      shell: bash
+      run: |
+        git config --global user.email "github-actions@github.com"
+        git config --global user.name "GitHub Actions"
+
     - name: Check git status
       shell: bash
       run: |
