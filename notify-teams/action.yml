@@ -1,0 +1,42 @@
+name: Notify Teams
+description: 'Manda una notifica su Microsoft Teams'
+
+inputs:
+  webhook-url:
+    description: 'URL del webhook di Teams'
+    required: true
+  title:
+    description: 'Titolo del messaggio'
+    required: true
+  message:
+    description: 'Corpo del messaggio'
+    required: true
+  color:
+    description: 'Colore del messaggio (green, red, orange)'
+    required: false
+    default: 'green'
+
+runs:
+  using: composite
+  steps:
+    - name: Manda notifica Teams
+      shell: bash
+      run: |
+        case "${{ inputs.color }}" in
+          red)    COLOR="FF0000" ;;
+          orange) COLOR="FFA500" ;;
+          *)      COLOR="00FF00" ;;
+        esac
+
+        curl -s -X POST "${{ inputs.webhook-url }}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"@type\": \"MessageCard\",
+            \"@context\": \"http://schema.org/extensions\",
+            \"themeColor\": \"${COLOR}\",
+            \"summary\": \"${{ inputs.title }}\",
+            \"sections\": [{
+              \"activityTitle\": \"${{ inputs.title }}\",
+              \"activityText\": \"${{ inputs.message }}\"
+            }]
+          }"
