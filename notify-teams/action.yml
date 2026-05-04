@@ -15,6 +15,10 @@ inputs:
     description: 'Colore del messaggio (green, red, orange)'
     required: false
     default: 'green'
+  attachment:
+    description: 'Testo aggiuntivo da mandare come secondo messaggio'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -25,6 +29,7 @@ runs:
         WEBHOOK_URL: ${{ inputs.webhook-url }}
         TITLE: ${{ inputs.title }}
         MESSAGE: ${{ inputs.message }}
+        ATTACHMENT: ${{ inputs.attachment }}
       run: |
         case "${{ inputs.color }}" in
           red)    COLOR="FF0000" ;;
@@ -44,3 +49,18 @@ runs:
               \"activityText\": \"${MESSAGE}\"
             }]
           }"
+
+        if [ -n "${ATTACHMENT}" ]; then
+          curl -s -X POST "${WEBHOOK_URL}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"@type\": \"MessageCard\",
+              \"@context\": \"http://schema.org/extensions\",
+              \"themeColor\": \"${COLOR}\",
+              \"summary\": \"Summary dettagliato\",
+              \"sections\": [{
+                \"activityTitle\": \"📄 Summary dettagliato\",
+                \"activityText\": \"${ATTACHMENT}\"
+              }]
+            }"
+        fi
