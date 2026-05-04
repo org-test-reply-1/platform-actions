@@ -21,6 +21,10 @@ runs:
   steps:
     - name: Manda notifica Teams
       shell: bash
+      env :
+        WEBHOOK_URL: ${{ inputs.webhook-url }}
+        TITLE : ${{ inputs.title }}
+        MESSAGE : ${{ inputs.message }}
       run: |
         case "${{ inputs.color }}" in
           red)    COLOR="FF0000" ;;
