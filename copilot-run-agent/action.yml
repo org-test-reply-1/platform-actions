@@ -24,8 +24,10 @@ inputs:
       ### Output richiesto:
       - Report dettagliato con severity (CRITICAL, HIGH, MEDIUM, LOW)
       - Per ogni problema: descrizione, file interessato, linea (se possibile), fix suggerito
-      - Proponi una **Pull Request** con i fix per i problemi di sicurezza CRITICAL e HIGH
+      - Proponi **UNA SOLA Pull Request** con tutti i fix per i problemi di sicurezza CRITICAL e HIGH
+      - La PR deve referenziare questa issue con "Closes #NUMERO" nel body
       - Includi un sommario della qualità complessiva del codice
+      - NON creare issue o PR multiple: tutto in una singola PR collegata a questa issue
   scan-paths:
     description: 'Path da scansionare (default: tutto il repo)'
     required: false
@@ -88,8 +90,59 @@ runs:
       run: |
         REPO="${{ github.repository }}"
         TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+        ISSUE_TITLE="${{ inputs.issue-title }}"
 
-        # Costruisci il body della issue
+        # Controlla se esiste già una issue aperta con lo stesso titolo (1 issue per repo)
+        EXISTING_ISSUE=$(gh issue list --repo "$REPO" --state open --label "copilot-auto" \
+          --search "$ISSUE_TITLE" --json number,url --jq '.[0]' 2>/dev/null || echo "")
+
+        if [ -n "$EXISTING_ISSUE" ] && [ "$EXISTING_ISSUE" != "null" ]; then
+          EXISTING_NUMBER=$(echo "$EXISTING_ISSUE" | jq -r '.number')
+          EXISTING_URL=$(echo "$EXISTING_ISSUE" | jq -r '.url')
+          echo "⚠️ Issue già esistente: #${EXISTING_NUMBER} (${EXISTING_URL})"
+          echo "Aggiorno la issue esistente con il nuovo contesto..."
+
+          # Aggiorna il body della issue esistente
+          cat > issue-body.md << 'EOF'
+        ${{ inputs.task-prompt }}
+        EOF
+
+          cat >> issue-body.md << EOF
+
+        ---
+
+        ### 📋 Contesto automatico (aggiornato)
+
+        **Repository**: ${REPO}
+        **Branch**: ${{ github.ref_name }}
+        **Commit**: ${{ github.sha }}
+        **Timestamp**: ${TIMESTAMP}
+        **Trigger**: Pipeline AI Security Scan (aggiornamento)
+
+        EOF
+
+          cat repo-structure.md >> issue-body.md 2>/dev/null || true
+
+          cat >> issue-body.md << 'EOF'
+
+        ---
+
+        ### ⚡ Azioni richieste al Coding Agent:
+        1. Analizza tutto il codice sorgente della repository
+        2. Genera un report dettagliato con le criticità trovate
+        3. **Apri UNA SOLA Pull Request** collegata a questa issue con i fix per i problemi CRITICAL e HIGH
+        4. Commenta questa issue con il report completo
+        5. La PR deve referenziare questa issue con "Closes #NUMERO" nel body
+        EOF
+
+          gh issue edit "$EXISTING_NUMBER" --repo "$REPO" --body-file issue-body.md 2>/dev/null || true
+          echo "issue_url=${EXISTING_URL}" >> $GITHUB_OUTPUT
+          echo "issue_number=${EXISTING_NUMBER}" >> $GITHUB_OUTPUT
+          echo "✅ Issue esistente aggiornata: ${EXISTING_URL}"
+          exit 0
+        fi
+
+        # Costruisci il body della nuova issue
         cat > issue-body.md << 'EOF'
         ${{ inputs.task-prompt }}
         EOF
@@ -117,8 +170,9 @@ runs:
         ### ⚡ Azioni richieste al Coding Agent:
         1. Analizza tutto il codice sorgente della repository
         2. Genera un report dettagliato con le criticità trovate
-        3. **Apri una Pull Request** con i fix per i problemi CRITICAL e HIGH
+        3. **Apri UNA SOLA Pull Request** collegata a questa issue con i fix per i problemi CRITICAL e HIGH
         4. Commenta questa issue con il report completo
+        5. La PR deve referenziare questa issue con "Closes #NUMERO" nel body
         EOF
 
         # Crea la issue (costruisci i flag --label separati)
