@@ -47,19 +47,26 @@ runs:
         echo "🤖 Esecuzione agente Copilot..."
         echo "Agent: ${{ inputs.agent-file }}"
         echo "Output: ${{ inputs.output-file }}"
-        
+
         # Crea directory output se non esiste
-        mkdir -p "$(dirname "${{ inputs.output-file }}")"
-        
+        mkdir -p "$(dirname \"${{ inputs.output-file }}\")"
+
+        # Scrivi info di debug
+        echo "# Copilot CLI Debug" > copilot-debug.log
+        echo "Data: $(date -u)" >> copilot-debug.log
+        echo "Token (inizio): ${GH_TOKEN:0:6}..." >> copilot-debug.log
+        echo "Versione Copilot CLI:" >> copilot-debug.log
+        gh copilot --version >> copilot-debug.log 2>&1 || echo "Copilot CLI non disponibile" >> copilot-debug.log
+
         # Esegui il comando copilot in modalità non-interattiva con il flag -p
         {
           gh copilot -p "${{ inputs.task-prompt }}" 2>&1 || \
           echo "⚠️ Copilot command failed"
-        } > "${{ inputs.output-file }}"
-        
+        } > "${{ inputs.output-file }}" 2>>copilot-debug.log
+
         # Verifica che l'output sia stato generato
         if [ ! -f "${{ inputs.output-file }}" ] || [ ! -s "${{ inputs.output-file }}" ]; then
-          echo "⚠️ Generazione report fallita o vuota"
+          echo "⚠️ Generazione report fallita o vuota" | tee -a copilot-debug.log
           echo "# Security Scan Report" > "${{ inputs.output-file }}"
           echo "" >> "${{ inputs.output-file }}"
           echo "⚠️ Impossibile completare la scansione di sicurezza." >> "${{ inputs.output-file }}"
@@ -69,7 +76,7 @@ runs:
           echo "" >> "${{ inputs.output-file }}"
           echo "**Task Prompt**: ${{ inputs.task-prompt }}" >> "${{ inputs.output-file }}"
         fi
-        
+
         echo "✅ Report generato: ${{ inputs.output-file }}"
       env:
         GH_TOKEN: ${{ inputs.copilot-token }}
