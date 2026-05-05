@@ -1,5 +1,5 @@
 name: Copilot Run Agent
-description: 'Esegue un agente Copilot con un task personalizzato'
+description: 'Esegue un agente AI per analisi del codice tramite GitHub Models API'
 
 inputs:
   agent-file:
@@ -12,8 +12,12 @@ inputs:
     description: 'File di output per il risultato dell''agente'
     required: true
   copilot-token:
-    description: 'Token GitHub con accesso a Copilot'
+    description: 'Token GitHub con accesso a Copilot/Models API'
     required: true
+  model:
+    description: 'Modello AI da usare (default: gpt-4o)'
+    required: false
+    default: 'gpt-4o'
 
 runs:
   using: composite
@@ -41,54 +45,122 @@ runs:
         EOF
         fi
 
-    - name: Autentica gh CLI per Copilot
+    - name: Raccogli contesto del codice
       shell: bash
       run: |
-        echo "${{ inputs.copilot-token }}" | gh auth login --with-token
-        echo "✅ gh auth login completato"
-        gh auth status >> copilot-debug.log 2>&1 || true
+        echo "📂 Raccolta contesto del codice..."
+        {
+          echo "# Repository Structure"
+          find . -type f \
+            -not -path './.git/*' \
+            -not -path './node_modules/*' \
+            -not -path './bin/*' \
+            -not -path './obj/*' \
+            -not -path './.vs/*' \
+            -not -name '*.dll' \
+            -not -name '*.exe' \
+            -not -name '*.png' \
+            -not -name '*.jpg' \
+            -not -name '*.zip' \
+            | head -200 | sort
+          echo ""
+          echo "# File Contents (rilevanti per sicurezza)"
+          echo ""
+          TOTAL_SIZE=0
+          MAX_SIZE=50000
+          for f in $(find . -type f \
+            \( -name '*.yml' -o -name '*.yaml' -o -name '*.cs' -o -name '*.csproj' \
+               -o -name '*.json' -o -name '*.ps1' -o -name '*.sh' -o -name '*.md' \
+               -o -name 'Dockerfile*' -o -name '*.config' -o -name '*.xml' \) \
+            -not -path './.git/*' \
+            -not -path './node_modules/*' \
+            -not -path './bin/*' \
+            -not -path './obj/*' \
+            | head -80 | sort); do
+            FILE_SIZE=$(wc -c < "$f" 2>/dev/null || echo 0)
+            TOTAL_SIZE=$((TOTAL_SIZE + FILE_SIZE))
+            if [ "$TOTAL_SIZE" -gt "$MAX_SIZE" ]; then
+              echo "... (troncato per dimensione)"
+              break
+            fi
+            echo "## File: $f"
+            echo '```'
+            cat "$f" 2>/dev/null || echo "(impossibile leggere)"
+            echo '```'
+            echo ""
+          done
+        } > code-context.txt
+        echo "✅ Contesto raccolto: $(wc -c < code-context.txt) bytes"
 
-    - name: Esegui agente Copilot
+    - name: Esegui analisi AI tramite GitHub Models API
       shell: bash
       run: |
-        echo "🤖 Esecuzione agente Copilot..."
+        echo "🤖 Esecuzione analisi AI..."
         echo "Agent: ${{ inputs.agent-file }}"
         echo "Output: ${{ inputs.output-file }}"
+        echo "Model: ${{ inputs.model }}"
 
-        # Crea directory output se non esiste
         mkdir -p "$(dirname "${{ inputs.output-file }}")"
 
-        # Scrivi info di debug
-        echo "# Copilot CLI Debug" > copilot-debug.log
+        SYSTEM_PROMPT=$(cat "${{ inputs.agent-file }}")
+        CODE_CONTEXT=$(cat code-context.txt)
+
+        USER_PROMPT="${{ inputs.task-prompt }}
+
+        --- CODICE DELLA REPOSITORY ---
+        ${CODE_CONTEXT}"
+
+        echo "# AI Analysis Debug" > copilot-debug.log
         echo "Data: $(date -u)" >> copilot-debug.log
-        echo "Versione Copilot CLI:" >> copilot-debug.log
-        gh copilot --version >> copilot-debug.log 2>&1 || echo "Copilot CLI non disponibile" >> copilot-debug.log
-        echo "Auth status:" >> copilot-debug.log
-        gh auth status >> copilot-debug.log 2>&1 || true
+        echo "Modello: ${{ inputs.model }}" >> copilot-debug.log
+        echo "Contesto: $(wc -c < code-context.txt) bytes" >> copilot-debug.log
 
-        # Esegui il comando copilot senza GH_TOKEN (usa la sessione gh auth)
-        {
-          gh copilot -p "${{ inputs.task-prompt }}" 2>&1 || \
-          echo "⚠️ Copilot command failed"
-        } > "${{ inputs.output-file }}" 2>>copilot-debug.log
+        RESPONSE=$(curl -s -w "\n%{http_code}" \
+          "https://models.github.ai/inference/chat/completions" \
+          -H "Authorization: Bearer ${GH_TOKEN}" \
+          -H "Content-Type: application/json" \
+          -d "$(jq -n \
+            --arg model "${{ inputs.model }}" \
+            --arg system "$SYSTEM_PROMPT" \
+            --arg user "$USER_PROMPT" \
+            '{
+              model: $model,
+              messages: [
+                {role: "system", content: $system},
+                {role: "user", content: $user}
+              ],
+              max_tokens: 4096,
+              temperature: 0.3
+            }')" 2>>copilot-debug.log)
 
-        # Verifica che l'output sia stato generato
-        if [ ! -f "${{ inputs.output-file }}" ] || [ ! -s "${{ inputs.output-file }}" ]; then
-          echo "⚠️ Generazione report fallita o vuota" | tee -a copilot-debug.log
+        HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+        BODY=$(echo "$RESPONSE" | sed '$d')
+
+        echo "HTTP Status: ${HTTP_CODE}" >> copilot-debug.log
+
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "$BODY" | jq -r '.choices[0].message.content' > "${{ inputs.output-file }}"
+          echo "✅ Report generato con successo: ${{ inputs.output-file }}"
+        else
+          echo "❌ Errore API (HTTP ${HTTP_CODE})" | tee -a copilot-debug.log
+          echo "Response: ${BODY}" >> copilot-debug.log
           echo "# Security Scan Report" > "${{ inputs.output-file }}"
           echo "" >> "${{ inputs.output-file }}"
-          echo "⚠️ Impossibile completare la scansione di sicurezza." >> "${{ inputs.output-file }}"
+          echo "⚠️ Errore durante la scansione AI (HTTP ${HTTP_CODE})." >> "${{ inputs.output-file }}"
           echo "" >> "${{ inputs.output-file }}"
-          echo "**Status**: Incomplete" >> "${{ inputs.output-file }}"
+          echo "**Status**: Failed" >> "${{ inputs.output-file }}"
           echo "**Timestamp**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "${{ inputs.output-file }}"
+          echo "**HTTP Code**: ${HTTP_CODE}" >> "${{ inputs.output-file }}"
           echo "" >> "${{ inputs.output-file }}"
-          echo "**Task Prompt**: ${{ inputs.task-prompt }}" >> "${{ inputs.output-file }}"
+          echo '```' >> "${{ inputs.output-file }}"
+          echo "${BODY}" >> "${{ inputs.output-file }}"
+          echo '```' >> "${{ inputs.output-file }}"
         fi
-
-        echo "✅ Report generato: ${{ inputs.output-file }}"
+      env:
+        GH_TOKEN: ${{ inputs.copilot-token }}
 
     - name: Mostra preview report
       shell: bash
       run: |
         echo "📄 Preview del report generato:"
-        head -n 20 "${{ inputs.output-file }}" || true
+        head -n 30 "${{ inputs.output-file }}" || true
