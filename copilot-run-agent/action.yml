@@ -129,18 +129,24 @@ runs:
         echo "Modello: ${{ inputs.model }}" >> copilot-debug.log
         echo "Contesto: $(wc -c < code-context.txt 2>/dev/null || echo 0) bytes" >> copilot-debug.log
 
-        # Crea il payload JSON in modo più sicuro
-        cat > request.json << EOF
-        {
-          "model": "${{ inputs.model }}",
-          "messages": [
-            {"role": "system", "content": $(echo "$SYSTEM_PROMPT" | jq -R .)},
-            {"role": "user", "content": $(echo "$USER_PROMPT" | jq -R .)}
-          ],
-          "max_tokens": 4096,
-          "temperature": 0.3
-        }
-        EOF
+        # Crea il payload JSON in modo più sicuro usando printf e jq
+        printf '%s' "$SYSTEM_PROMPT" > system_prompt.txt
+        printf '%s' "$USER_PROMPT" > user_prompt.txt
+        
+        # Costruisci il JSON usando jq per evitare problemi di escape
+        jq -n \
+          --rawfile system system_prompt.txt \
+          --rawfile user user_prompt.txt \
+          --arg model "${{ inputs.model }}" \
+          '{
+            model: $model,
+            messages: [
+              {role: "system", content: $system},
+              {role: "user", content: $user}
+            ],
+            max_tokens: 4096,
+            temperature: 0.3
+          }' > request.json
 
         echo "Payload JSON creato: $(wc -c < request.json) bytes" >> copilot-debug.log
 
