@@ -1,262 +1,201 @@
 name: Copilot Run Agent
-description: 'Esegue un agente AI per analisi del codice tramite GitHub Models API'
+description: 'Crea una issue di scan AI e la assegna al Coding Agent (@copilot) per analisi completa del codice'
 
 inputs:
-  agent-file:
-    description: 'Path al file agent markdown (.agent.md)'
-    required: true
   task-prompt:
-    description: 'Prompt del task da eseguire'
-    required: true
-  output-file:
-    description: 'File di output per il risultato dell''agente'
-    required: true
-  copilot-token:
-    description: 'Token GitHub con accesso a Copilot/Models API'
-    required: true
-  model:
-    description: 'Modello AI da usare (default: gpt-4o-mini)'
+    description: 'Prompt dettagliato per il Coding Agent'
     required: false
-    default: 'gpt-4o-mini'
+    default: |
+      ## 🔍 Analisi completa del codice sorgente
+
+      Scansiona **tutto** il codice sorgente di questa repository, inclusi:
+      - Workflow e pipeline CI/CD (`.github/workflows/`)
+      - Script (PowerShell, Bash)
+      - Dockerfile e configurazioni container
+      - Codice applicativo (.cs, .csproj, .json, .xml, .config)
+      - File di configurazione e secrets management
+
+      ### Obiettivi dell'analisi:
+      1. **Sicurezza**: identifica vulnerabilità, secrets hardcoded, injection, misconfiguration
+      2. **Qualità del codice**: code smells, duplicazioni, complessità eccessiva
+      3. **Best practices**: pattern mancanti, configurazioni non ottimali
+      4. **Pipeline**: problemi nei workflow, permessi eccessivi, mancanza di validazioni
+
+      ### Output richiesto:
+      - Report dettagliato con severity (CRITICAL, HIGH, MEDIUM, LOW)
+      - Per ogni problema: descrizione, file interessato, linea (se possibile), fix suggerito
+      - Proponi una **Pull Request** con i fix per i problemi di sicurezza CRITICAL e HIGH
+      - Includi un sommario della qualità complessiva del codice
+  scan-paths:
+    description: 'Path da scansionare (default: tutto il repo)'
+    required: false
+    default: '.'
+  issue-title:
+    description: 'Titolo della issue'
+    required: false
+    default: '🤖 AI Security & Quality Scan'
+  labels:
+    description: 'Labels per la issue (comma-separated)'
+    required: false
+    default: 'copilot-auto,security,code-quality'
+  assign-pat:
+    description: 'PAT fine-grained con Issues Read/Write e Contents Read/Write'
+    required: true
+
+outputs:
+  issue-url:
+    description: 'URL della issue creata'
+    value: ${{ steps.create-issue.outputs.issue_url }}
+  issue-number:
+    description: 'Numero della issue creata'
+    value: ${{ steps.create-issue.outputs.issue_number }}
 
 runs:
   using: composite
   steps:
-    - name: Verifica agent file
+    - name: Raccogli struttura repository
+      id: context
       shell: bash
       run: |
-        if [ ! -f "${{ inputs.agent-file }}" ]; then
-          echo "⚠️ Agent file non trovato: ${{ inputs.agent-file }}"
-          echo "Creazione di un agent generico di fallback..."
-          mkdir -p "$(dirname "${{ inputs.agent-file }}")"
-          cat > "${{ inputs.agent-file }}" << 'EOF'
-        # Security Reporter Agent
-
-        You are a security analysis agent. Your task is to analyze code for security vulnerabilities.
-
-        ## Instructions
-        1. Scan the provided codebase paths
-        2. Identify security vulnerabilities
-        3. Categorize findings by severity (CRITICAL, HIGH, MEDIUM, LOW)
-        4. Provide clear, actionable recommendations
-
-        ## Output Format
-        Use markdown format with clear sections for each vulnerability found.
-        EOF
-        fi
-
-    - name: Raccogli contesto del codice
-      shell: bash
-      run: |
-        echo "📂 Raccolta contesto del codice..."
+        echo "📂 Raccolta struttura repository per contesto issue..."
         {
-          echo "# Repository Structure"
-          find . -maxdepth 3 -type f \
+          echo "## 📁 Struttura Repository"
+          echo '```'
+          find ${{ inputs.scan-paths }} -maxdepth 4 -type f \
             -not -path './.git/*' \
             -not -path './node_modules/*' \
             -not -path './bin/*' \
             -not -path './obj/*' \
             -not -path './.vs/*' \
-            -not -name '*.dll' \
-            -not -name '*.exe' \
-            -not -name '*.png' \
-            -not -name '*.jpg' \
-            -not -name '*.zip' \
-            2>/dev/null | head -200 | sort || true
+            -not -name '*.dll' -not -name '*.exe' \
+            -not -name '*.png' -not -name '*.jpg' -not -name '*.zip' \
+            2>/dev/null | sort | head -150 || true
+          echo '```'
           echo ""
-          echo "# File Contents (rilevanti per sicurezza)"
-          echo ""
-          
-          # Lista file rilevanti in modo più sicuro
-          RELEVANT_FILES=$(find . -maxdepth 3 -type f \
-            \( -name '*.yml' -o -name '*.yaml' -o -name '*.cs' -o -name '*.csproj' \
-               -o -name '*.json' -o -name '*.ps1' -o -name '*.sh' -o -name '*.md' \
-               -o -name 'Dockerfile*' -o -name '*.config' -o -name '*.xml' \) \
-            -not -path './.git/*' \
-            -not -path './node_modules/*' \
-            -not -path './bin/*' \
-            -not -path './obj/*' \
-            2>/dev/null | head -50 | sort || true)
-          
-          TOTAL_SIZE=0
-          MAX_SIZE=30000
-          echo "$RELEVANT_FILES" | while IFS= read -r f; do
-            if [ -n "$f" ] && [ -f "$f" ]; then
-              FILE_SIZE=$(wc -c < "$f" 2>/dev/null || echo 0)
-              TOTAL_SIZE=$((TOTAL_SIZE + FILE_SIZE))
-              if [ "$TOTAL_SIZE" -gt "$MAX_SIZE" ]; then
-                echo "... (troncato per dimensione: ${TOTAL_SIZE} bytes)"
-                break
-              fi
-              echo "## File: $f"
-              echo '```'
-              head -100 "$f" 2>/dev/null || echo "(impossibile leggere)"
-              echo '```'
-              echo ""
-            fi
-          done
-        } > code-context.txt 2>/dev/null || echo "Errore nella raccolta contesto" > code-context.txt
-        echo "✅ Contesto raccolto: $(wc -c < code-context.txt 2>/dev/null || echo 0) bytes"
+          echo "## 📊 Statistiche"
+          echo "- **File totali**: $(find ${{ inputs.scan-paths }} -type f -not -path './.git/*' 2>/dev/null | wc -l)"
+          echo "- **Workflow YAML**: $(find . -name '*.yml' -o -name '*.yaml' | grep -v '.git' | wc -l)"
+          echo "- **Dockerfile**: $(find . -name 'Dockerfile*' | wc -l)"
+          echo "- **Script**: $(find . \( -name '*.ps1' -o -name '*.sh' \) | grep -v '.git' | wc -l)"
+          echo "- **Codice .NET**: $(find . -name '*.cs' -o -name '*.csproj' | wc -l)"
+        } > repo-structure.md 2>/dev/null || echo "Errore raccolta struttura" > repo-structure.md
 
-    - name: Esegui analisi AI tramite GitHub Models API
+    - name: Crea issue per Coding Agent
+      id: create-issue
       shell: bash
-      run: |
-        set -e  # Ferma su errori
-        echo "🤖 Esecuzione analisi AI..."
-        echo "Agent: ${{ inputs.agent-file }}"
-        echo "Output: ${{ inputs.output-file }}"
-        echo "Model: ${{ inputs.model }}"
-
-        mkdir -p "$(dirname "${{ inputs.output-file }}")"
-
-        # Verifica che il file di contesto esista
-        if [ ! -f "code-context.txt" ]; then
-          echo "⚠️ File contesto non trovato, creo un contesto minimo..."
-          echo "# Repository Scan - Errore nel contesto" > code-context.txt
-          echo "Impossibile raccogliere il contesto completo del codice." >> code-context.txt
-        fi
-
-        SYSTEM_PROMPT=$(cat "${{ inputs.agent-file }}" 2>/dev/null || echo "Analyze code for security vulnerabilities.")
-        CODE_CONTEXT=$(cat code-context.txt 2>/dev/null || echo "No context available")
-
-        USER_PROMPT="${{ inputs.task-prompt }}
-
-        --- CODICE DELLA REPOSITORY ---
-        ${CODE_CONTEXT}"
-
-        echo "# AI Analysis Debug" > copilot-debug.log
-        echo "Data: $(date -u)" >> copilot-debug.log
-        echo "Modello: ${{ inputs.model }}" >> copilot-debug.log
-        echo "Contesto: $(wc -c < code-context.txt 2>/dev/null || echo 0) bytes" >> copilot-debug.log
-
-        # Crea il payload JSON in modo più sicuro usando printf e jq
-        printf '%s' "$SYSTEM_PROMPT" > system_prompt.txt
-        printf '%s' "$USER_PROMPT" > user_prompt.txt
-        
-        # Costruisci il JSON usando jq per evitare problemi di escape
-        jq -n \
-          --rawfile system system_prompt.txt \
-          --rawfile user user_prompt.txt \
-          --arg model "${{ inputs.model }}" \
-          '{
-            model: $model,
-            messages: [
-              {role: "system", content: $system},
-              {role: "user", content: $user}
-            ],
-            max_tokens: 4096,
-            temperature: 0.3
-          }' > request.json
-
-        echo "Payload JSON creato: $(wc -c < request.json) bytes" >> copilot-debug.log
-
-        RESPONSE=$(curl -s -w "\n%{http_code}" \
-          "https://models.github.ai/inference/chat/completions" \
-          -H "Authorization: Bearer ${GH_TOKEN}" \
-          -H "Content-Type: application/json" \
-          -d @request.json 2>>copilot-debug.log || echo -e "curl_error\n500")
-
-        HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-        BODY=$(echo "$RESPONSE" | sed '$d')
-
-        echo "HTTP Status: ${HTTP_CODE}" >> copilot-debug.log
-
-        if [ "$HTTP_CODE" = "200" ]; then
-          echo "$BODY" | jq -r '.choices[0].message.content' > "${{ inputs.output-file }}" 2>/dev/null || {
-            echo "# AI Security Scan Report" > "${{ inputs.output-file }}"
-            echo "" >> "${{ inputs.output-file }}"
-            echo "✅ **Scansione completata** ma errore nel parsing della risposta AI." >> "${{ inputs.output-file }}"
-            echo "" >> "${{ inputs.output-file }}"
-            echo "**Raw Response**:" >> "${{ inputs.output-file }}"
-            echo '```json' >> "${{ inputs.output-file }}"
-            echo "$BODY" | head -50 >> "${{ inputs.output-file }}"
-            echo '```' >> "${{ inputs.output-file }}"
-          }
-          echo "✅ Report generato con successo: ${{ inputs.output-file }}"
-        elif [ "$HTTP_CODE" = "403" ] && echo "$BODY" | grep -q "no_access"; then
-          # Prova con modelli alternativi se il primo non è accessibile
-          echo "⚠️ Modello ${{ inputs.model }} non accessibile, provo con altri modelli..." | tee -a copilot-debug.log
-          
-          # Lista di modelli da provare in ordine
-          FALLBACK_MODELS="gpt-3.5-turbo Phi-3-medium-4k-instruct Meta-Llama-3-8B-Instruct gpt-4 text-davinci-003"
-          
-          SUCCESS=false
-          for MODEL in $FALLBACK_MODELS; do
-            echo "Tentativo con modello: ${MODEL}" | tee -a copilot-debug.log
-            
-            # Aggiorna il JSON per il modello corrente
-            jq --arg model "$MODEL" '.model = $model' request.json > request-fallback.json
-            
-            RESPONSE_FB=$(curl -s -w "\n%{http_code}" \
-              "https://models.github.ai/inference/chat/completions" \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H "Content-Type: application/json" \
-              -d @request-fallback.json 2>>copilot-debug.log || echo -e "curl_error\n500")
-            
-            HTTP_CODE_FB=$(echo "$RESPONSE_FB" | tail -1)
-            BODY_FB=$(echo "$RESPONSE_FB" | sed '$d')
-            
-            echo "Fallback ${MODEL} HTTP Status: ${HTTP_CODE_FB}" >> copilot-debug.log
-            
-            if [ "$HTTP_CODE_FB" = "200" ]; then
-              echo "$BODY_FB" | jq -r '.choices[0].message.content' > "${{ inputs.output-file }}" 2>/dev/null || {
-                echo "# AI Security Scan Report" > "${{ inputs.output-file }}"
-                echo "" >> "${{ inputs.output-file }}"
-                echo "✅ **Scansione completata con ${MODEL}** ma errore nel parsing." >> "${{ inputs.output-file }}"
-                echo "" >> "${{ inputs.output-file }}"
-                echo "**Raw Response**:" >> "${{ inputs.output-file }}"
-                echo '```json' >> "${{ inputs.output-file }}"
-                echo "$BODY_FB" | head -50 >> "${{ inputs.output-file }}"
-                echo '```' >> "${{ inputs.output-file }}"
-              }
-              echo "✅ Report generato con successo usando ${MODEL}: ${{ inputs.output-file }}"
-              SUCCESS=true
-              break
-            else
-              echo "❌ Modello ${MODEL} fallito (HTTP ${HTTP_CODE_FB})" | tee -a copilot-debug.log
-              echo "Response ${MODEL}: ${BODY_FB}" >> copilot-debug.log
-            fi
-          done
-          
-          if [ "$SUCCESS" = "false" ]; then
-            echo "# AI Security Scan Report" > "${{ inputs.output-file }}"
-            echo "" >> "${{ inputs.output-file }}"
-            echo "⚠️ **Nessun modello AI disponibile** per la scansione." >> "${{ inputs.output-file }}"
-            echo "" >> "${{ inputs.output-file }}"
-            echo "**Status**: No Models Available" >> "${{ inputs.output-file }}"
-            echo "**Timestamp**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "${{ inputs.output-file }}"
-            echo "**Modelli testati**: ${{ inputs.model }}, ${FALLBACK_MODELS}" >> "${{ inputs.output-file }}"
-            echo "" >> "${{ inputs.output-file }}"
-            echo "**Possibili soluzioni**:" >> "${{ inputs.output-file }}"
-            echo "- Verifica che GitHub Models sia abilitato per l'organizzazione" >> "${{ inputs.output-file }}"
-            echo "- Controlla che il token abbia i permessi necessari" >> "${{ inputs.output-file }}"
-            echo "- Contatta l'amministratore GitHub per abilitare l'accesso AI" >> "${{ inputs.output-file }}"
-          fi
-          rm -f request-fallback.json 2>/dev/null || true
-        else
-          echo "❌ Errore API (HTTP ${HTTP_CODE})" | tee -a copilot-debug.log
-          echo "Response: ${BODY}" >> copilot-debug.log
-          echo "# AI Security Scan Report" > "${{ inputs.output-file }}"
-          echo "" >> "${{ inputs.output-file }}"
-          echo "⚠️ Errore durante la scansione AI (HTTP ${HTTP_CODE})." >> "${{ inputs.output-file }}"
-          echo "" >> "${{ inputs.output-file }}"
-          echo "**Status**: Failed" >> "${{ inputs.output-file }}"
-          echo "**Timestamp**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "${{ inputs.output-file }}"
-          echo "**HTTP Code**: ${HTTP_CODE}" >> "${{ inputs.output-file }}"
-          echo "" >> "${{ inputs.output-file }}"
-          echo "**Error Response**:" >> "${{ inputs.output-file }}"
-          echo '```' >> "${{ inputs.output-file }}"
-          echo "${BODY}" | head -20 >> "${{ inputs.output-file }}"
-          echo '```' >> "${{ inputs.output-file }}"
-        fi
-
-        # Cleanup
-        rm -f request.json system_prompt.txt user_prompt.txt 2>/dev/null || true
       env:
-        GH_TOKEN: ${{ inputs.copilot-token }}
+        GH_TOKEN: ${{ inputs.assign-pat }}
+      run: |
+        REPO="${{ github.repository }}"
+        TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
 
-    - name: Mostra preview report
+        # Costruisci il body della issue
+        cat > issue-body.md << 'EOF'
+        ${{ inputs.task-prompt }}
+        EOF
+
+        cat >> issue-body.md << EOF
+
+        ---
+
+        ### 📋 Contesto automatico
+
+        **Repository**: ${REPO}
+        **Branch**: ${{ github.ref_name }}
+        **Commit**: ${{ github.sha }}
+        **Timestamp**: ${TIMESTAMP}
+        **Trigger**: Pipeline AI Security Scan
+
+        EOF
+
+        cat repo-structure.md >> issue-body.md 2>/dev/null || true
+
+        cat >> issue-body.md << 'EOF'
+
+        ---
+
+        ### ⚡ Azioni richieste al Coding Agent:
+        1. Analizza tutto il codice sorgente della repository
+        2. Genera un report dettagliato con le criticità trovate
+        3. **Apri una Pull Request** con i fix per i problemi CRITICAL e HIGH
+        4. Commenta questa issue con il report completo
+        EOF
+
+        # Crea la issue
+        ISSUE_URL=$(gh issue create \
+          --repo "$REPO" \
+          --title "${{ inputs.issue-title }} - ${TIMESTAMP}" \
+          --body-file issue-body.md \
+          --label "${{ inputs.labels }}" 2>&1)
+
+        echo "issue_url=${ISSUE_URL}" >> $GITHUB_OUTPUT
+
+        # Estrai numero issue
+        ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oP '/issues/\K[0-9]+' || echo "")
+        echo "issue_number=${ISSUE_NUMBER}" >> $GITHUB_OUTPUT
+        echo "✅ Issue creata: ${ISSUE_URL}"
+
+    - name: Assegna a @copilot (Coding Agent)
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.assign-pat }}
+      run: |
+        ISSUE_NUMBER="${{ steps.create-issue.outputs.issue_number }}"
+        REPO="${{ github.repository }}"
+
+        if [ -z "$ISSUE_NUMBER" ]; then
+          echo "⚠️ Numero issue non disponibile, skip assegnazione"
+          exit 0
+        fi
+
+        echo "🤖 Assegnazione issue #${ISSUE_NUMBER} a @copilot..."
+
+        # Metodo 1: GraphQL (più affidabile per @copilot)
+        ISSUE_NODE_ID=$(gh api "/repos/${REPO}/issues/${ISSUE_NUMBER}" --jq '.node_id' 2>/dev/null || echo "")
+        COPILOT_NODE_ID=$(gh api "/users/copilot" --jq '.node_id' 2>/dev/null || echo "")
+
+        if [ -n "$ISSUE_NODE_ID" ] && [ -n "$COPILOT_NODE_ID" ]; then
+          gh api graphql -f query='
+            mutation {
+              updateIssue(input: {
+                id: "'"${ISSUE_NODE_ID}"'"
+                assigneeIds: ["'"${COPILOT_NODE_ID}"'"]
+              }) {
+                issue {
+                  url
+                  assignees(first: 5) {
+                    nodes { login }
+                  }
+                }
+              }
+            }
+          ' 2>/dev/null && echo "✅ Issue #${ISSUE_NUMBER} assegnata a @copilot via GraphQL" || {
+            echo "⚠️ GraphQL fallito, tentativo con gh issue edit..."
+            gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-assignee "copilot" 2>/dev/null || \
+              echo "⚠️ Assign fallback: verificare manualmente issue #${ISSUE_NUMBER}"
+          }
+        else
+          # Fallback diretto
+          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-assignee "copilot" 2>/dev/null || \
+            echo "⚠️ Assegnazione @copilot non riuscita — il Coding Agent potrebbe comunque processarla via label"
+        fi
+
+    - name: Summary
       shell: bash
       run: |
-        echo "📄 Preview del report generato:"
-        head -n 30 "${{ inputs.output-file }}" || true
+        echo "## 🤖 AI Security & Quality Scan" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "✅ **Issue creata e assegnata al Coding Agent**" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Campo | Valore |" >> $GITHUB_STEP_SUMMARY
+        echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Issue | ${{ steps.create-issue.outputs.issue_url }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Numero | #${{ steps.create-issue.outputs.issue_number }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Assegnata a | @copilot |" >> $GITHUB_STEP_SUMMARY
+        echo "| Repository | ${{ github.repository }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### ⏳ Prossimi passi (automatici)" >> $GITHUB_STEP_SUMMARY
+        echo "1. Il Coding Agent analizzerà il codice sorgente" >> $GITHUB_STEP_SUMMARY
+        echo "2. Commenterà la issue con il report" >> $GITHUB_STEP_SUMMARY
+        echo "3. Aprirà una PR con i fix per problemi CRITICAL/HIGH" >> $GITHUB_STEP_SUMMARY
