@@ -121,12 +121,23 @@ runs:
         4. Commenta questa issue con il report completo
         EOF
 
-        # Crea la issue
+        # Crea la issue (costruisci i flag --label separati)
+        LABEL_FLAGS=""
+        IFS=',' read -ra LABEL_ARRAY <<< "${{ inputs.labels }}"
+        for lbl in "${LABEL_ARRAY[@]}"; do
+          lbl=$(echo "$lbl" | xargs)  # trim whitespace
+          if [ -n "$lbl" ]; then
+            # Crea la label se non esiste
+            gh label create "$lbl" --repo "$REPO" --color "ededed" 2>/dev/null || true
+            LABEL_FLAGS="${LABEL_FLAGS} --label ${lbl}"
+          fi
+        done
+
         ISSUE_URL=$(gh issue create \
           --repo "$REPO" \
           --title "${{ inputs.issue-title }} - ${TIMESTAMP}" \
           --body-file issue-body.md \
-          --label "${{ inputs.labels }}" 2>&1)
+          ${LABEL_FLAGS} 2>&1)
 
         echo "issue_url=${ISSUE_URL}" >> $GITHUB_OUTPUT
 
