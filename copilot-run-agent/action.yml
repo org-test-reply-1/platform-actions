@@ -161,31 +161,21 @@ runs:
 
         echo "🤖 Assegnazione issue #${ISSUE_NUMBER} a @copilot..."
 
-        # Metodo 1: GraphQL con variabili (evita problemi di escape nei node_id)
-        ISSUE_NODE_ID=$(gh api "/repos/${REPO}/issues/${ISSUE_NUMBER}" --jq '.node_id' 2>/dev/null || echo "")
-        COPILOT_NODE_ID=$(gh api "/users/copilot" --jq '.node_id' 2>/dev/null || echo "")
+        # Metodo 1: REST API per assegnare copilot (formato JSON corretto)
+        echo '{"assignees":["copilot"]}' | gh api "/repos/${REPO}/issues/${ISSUE_NUMBER}/assignees" \
+          --method POST \
+          --input - \
+          2>/dev/null && echo "✅ Issue #${ISSUE_NUMBER} assegnata a @copilot via REST API" || {
 
-        if [ -n "$ISSUE_NODE_ID" ] && [ -n "$COPILOT_NODE_ID" ]; then
-          # Usa jq per costruire il payload GraphQL correttamente
-          jq -n \
-            --arg issueId "$ISSUE_NODE_ID" \
-            --arg copilotId "$COPILOT_NODE_ID" \
-            '{
-              query: "mutation($issueId: ID!, $assigneeIds: [ID!]!) { updateIssue(input: { id: $issueId, assigneeIds: $assigneeIds }) { issue { url assignees(first: 5) { nodes { login } } } } }",
-              variables: { issueId: $issueId, assigneeIds: [$copilotId] }
-            }' > graphql-payload.json
+          # Metodo 2: gh issue edit
+          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-assignee "copilot" 2>/dev/null && \
+            echo "✅ Issue #${ISSUE_NUMBER} assegnata a @copilot via gh issue edit" || {
 
-          gh api graphql --input graphql-payload.json \
-            2>/dev/null && echo "✅ Issue #${ISSUE_NUMBER} assegnata a @copilot via GraphQL" || {
-            echo "⚠️ GraphQL fallito, tentativo con gh issue edit..."
-            gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-assignee "copilot" 2>/dev/null || \
-              echo "⚠️ Assign fallback: verificare manualmente issue #${ISSUE_NUMBER}"
+            # Metodo 3: Aggiungi label 'copilot' per attivare il Coding Agent via label
+            gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-label "copilot" 2>/dev/null || true
+            echo "⚠️ Assegnazione diretta fallita — aggiunta label 'copilot' per attivare il Coding Agent"
           }
-        else
-          # Fallback diretto
-          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-assignee "copilot" 2>/dev/null || \
-            echo "⚠️ Assegnazione @copilot non riuscita — il Coding Agent potrebbe comunque processarla via label"
-        fi
+        }
 
     - name: Summary
       shell: bash
