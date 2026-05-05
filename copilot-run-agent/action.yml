@@ -1,0 +1,80 @@
+name: Copilot Run Agent
+description: 'Esegue un agente Copilot con un task personalizzato'
+
+inputs:
+  agent-file:
+    description: 'Path al file agent markdown (.agent.md)'
+    required: true
+  task-prompt:
+    description: 'Prompt del task da eseguire'
+    required: true
+  output-file:
+    description: 'File di output per il risultato dell''agente'
+    required: true
+  copilot-token:
+    description: 'Token GitHub con accesso a Copilot'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Verifica agent file
+      shell: bash
+      run: |
+        if [ ! -f "${{ inputs.agent-file }}" ]; then
+          echo "⚠️ Agent file non trovato: ${{ inputs.agent-file }}"
+          echo "Creazione di un agent generico di fallback..."
+          mkdir -p "$(dirname "${{ inputs.agent-file }}")"
+          cat > "${{ inputs.agent-file }}" << 'EOF'
+        # Security Reporter Agent
+
+        You are a security analysis agent. Your task is to analyze code for security vulnerabilities.
+
+        ## Instructions
+        1. Scan the provided codebase paths
+        2. Identify security vulnerabilities
+        3. Categorize findings by severity (CRITICAL, HIGH, MEDIUM, LOW)
+        4. Provide clear, actionable recommendations
+
+        ## Output Format
+        Use markdown format with clear sections for each vulnerability found.
+        EOF
+        fi
+
+    - name: Esegui agente Copilot
+      shell: bash
+      run: |
+        echo "🤖 Esecuzione agente Copilot..."
+        echo "Agent: ${{ inputs.agent-file }}"
+        echo "Output: ${{ inputs.output-file }}"
+        
+        # Crea directory output se non esiste
+        mkdir -p "$(dirname "${{ inputs.output-file }}")"
+        
+        # Esegui il comando copilot
+        gh copilot suggest --shell << 'EOPROMPT' > "${{ inputs.output-file }}" 2>&1 || true
+        ${{ inputs.task-prompt }}
+        EOPROMPT
+        
+        # Verifica che l'output sia stato generato
+        if [ ! -f "${{ inputs.output-file }}" ] || [ ! -s "${{ inputs.output-file }}" ]; then
+          echo "⚠️ Generazione report fallita o vuota"
+          echo "# Security Scan Report" > "${{ inputs.output-file }}"
+          echo "" >> "${{ inputs.output-file }}"
+          echo "⚠️ Impossibile completare la scansione di sicurezza." >> "${{ inputs.output-file }}"
+          echo "" >> "${{ inputs.output-file }}"
+          echo "**Status**: Incomplete" >> "${{ inputs.output-file }}"
+          echo "**Timestamp**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "${{ inputs.output-file }}"
+        fi
+        
+        echo "✅ Report generato: ${{ inputs.output-file }}"
+      env:
+        GH_TOKEN: ${{ inputs.copilot-token }}
+
+    - name: Mostra preview report
+      shell: bash
+      run: |
+        echo "📄 Preview del report generato:"
+        head -n 20 "${{ inputs.output-file }}" || true
+      env:
+        GH_TOKEN: ${{ inputs.copilot-token }}
