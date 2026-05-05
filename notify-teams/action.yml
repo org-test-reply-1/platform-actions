@@ -37,30 +37,63 @@ runs:
           *)      COLOR="00FF00" ;;
         esac
 
+        # Escape per JSON
+        TITLE_ESC=$(echo "$TITLE" | sed 's/"/\\"/g')
+        MESSAGE_ESC=$(echo "$MESSAGE" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+
         curl -s -X POST "${WEBHOOK_URL}" \
           -H "Content-Type: application/json" \
           -d "{
-            \"@type\": \"MessageCard\",
-            \"@context\": \"http://schema.org/extensions\",
-            \"themeColor\": \"${COLOR}\",
-            \"summary\": \"${TITLE}\",
-            \"sections\": [{
-              \"activityTitle\": \"${TITLE}\",
-              \"activityText\": \"${MESSAGE}\"
+            \"type\": \"message\",
+            \"attachments\": [{
+              \"contentType\": \"application/vnd.microsoft.card.adaptive\",
+              \"content\": {
+                \"\$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",
+                \"type\": \"AdaptiveCard\",
+                \"version\": \"1.2\",
+                \"body\": [
+                  {
+                    \"type\": \"TextBlock\",
+                    \"text\": \"${TITLE_ESC}\",
+                    \"weight\": \"Bolder\",
+                    \"size\": \"Medium\",
+                    \"color\": \"$([ "${{ inputs.color }}" = "red" ] && echo "Attention" || echo "Good")\"
+                  },
+                  {
+                    \"type\": \"TextBlock\",
+                    \"text\": \"${MESSAGE_ESC}\",
+                    \"wrap\": true
+                  }
+                ]
+              }
             }]
           }"
 
         if [ -n "${ATTACHMENT}" ]; then
+          ATTACH_ESC=$(echo "$ATTACHMENT" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
           curl -s -X POST "${WEBHOOK_URL}" \
             -H "Content-Type: application/json" \
             -d "{
-              \"@type\": \"MessageCard\",
-              \"@context\": \"http://schema.org/extensions\",
-              \"themeColor\": \"${COLOR}\",
-              \"summary\": \"Summary dettagliato\",
-              \"sections\": [{
-                \"activityTitle\": \"📄 Summary dettagliato\",
-                \"activityText\": \"${ATTACHMENT}\"
+              \"type\": \"message\",
+              \"attachments\": [{
+                \"contentType\": \"application/vnd.microsoft.card.adaptive\",
+                \"content\": {
+                  \"\$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\",
+                  \"type\": \"AdaptiveCard\",
+                  \"version\": \"1.2\",
+                  \"body\": [
+                    {
+                      \"type\": \"TextBlock\",
+                      \"text\": \"📄 Summary dettagliato\",
+                      \"weight\": \"Bolder\"
+                    },
+                    {
+                      \"type\": \"TextBlock\",
+                      \"text\": \"${ATTACH_ESC}\",
+                      \"wrap\": true
+                    }
+                  ]
+                }
               }]
             }"
         fi
