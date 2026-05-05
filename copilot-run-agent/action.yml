@@ -41,6 +41,13 @@ runs:
         EOF
         fi
 
+    - name: Autentica gh CLI per Copilot
+      shell: bash
+      run: |
+        echo "${{ inputs.copilot-token }}" | gh auth login --with-token
+        echo "✅ gh auth login completato"
+        gh auth status >> copilot-debug.log 2>&1 || true
+
     - name: Esegui agente Copilot
       shell: bash
       run: |
@@ -49,16 +56,17 @@ runs:
         echo "Output: ${{ inputs.output-file }}"
 
         # Crea directory output se non esiste
-        mkdir -p "$(dirname \"${{ inputs.output-file }}\")"
+        mkdir -p "$(dirname "${{ inputs.output-file }}")"
 
         # Scrivi info di debug
         echo "# Copilot CLI Debug" > copilot-debug.log
         echo "Data: $(date -u)" >> copilot-debug.log
-        echo "Token (inizio): ${GH_TOKEN:0:6}..." >> copilot-debug.log
         echo "Versione Copilot CLI:" >> copilot-debug.log
         gh copilot --version >> copilot-debug.log 2>&1 || echo "Copilot CLI non disponibile" >> copilot-debug.log
+        echo "Auth status:" >> copilot-debug.log
+        gh auth status >> copilot-debug.log 2>&1 || true
 
-        # Esegui il comando copilot in modalità non-interattiva con il flag -p
+        # Esegui il comando copilot senza GH_TOKEN (usa la sessione gh auth)
         {
           gh copilot -p "${{ inputs.task-prompt }}" 2>&1 || \
           echo "⚠️ Copilot command failed"
@@ -78,13 +86,9 @@ runs:
         fi
 
         echo "✅ Report generato: ${{ inputs.output-file }}"
-      env:
-        GH_TOKEN: ${{ inputs.copilot-token }}
 
     - name: Mostra preview report
       shell: bash
       run: |
         echo "📄 Preview del report generato:"
         head -n 20 "${{ inputs.output-file }}" || true
-      env:
-        GH_TOKEN: ${{ inputs.copilot-token }}
