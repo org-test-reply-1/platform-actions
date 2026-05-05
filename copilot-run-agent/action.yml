@@ -175,45 +175,62 @@ runs:
           echo "✅ Report generato con successo: ${{ inputs.output-file }}"
         elif [ "$HTTP_CODE" = "403" ] && echo "$BODY" | grep -q "no_access"; then
           # Prova con modelli alternativi se il primo non è accessibile
-          echo "⚠️ Modello ${{ inputs.model }} non accessibile, provo con gpt-3.5-turbo..." | tee -a copilot-debug.log
+          echo "⚠️ Modello ${{ inputs.model }} non accessibile, provo con altri modelli..." | tee -a copilot-debug.log
           
-          # Aggiorna il JSON per gpt-3.5-turbo
-          jq '.model = "gpt-3.5-turbo"' request.json > request-fallback.json
+          # Lista di modelli da provare in ordine
+          FALLBACK_MODELS="gpt-3.5-turbo Phi-3-medium-4k-instruct Meta-Llama-3-8B-Instruct gpt-4 text-davinci-003"
           
-          RESPONSE2=$(curl -s -w "\n%{http_code}" \
-            "https://models.github.ai/inference/chat/completions" \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d @request-fallback.json 2>>copilot-debug.log || echo -e "curl_error\n500")
+          SUCCESS=false
+          for MODEL in $FALLBACK_MODELS; do
+            echo "Tentativo con modello: ${MODEL}" | tee -a copilot-debug.log
+            
+            # Aggiorna il JSON per il modello corrente
+            jq --arg model "$MODEL" '.model = $model' request.json > request-fallback.json
+            
+            RESPONSE_FB=$(curl -s -w "\n%{http_code}" \
+              "https://models.github.ai/inference/chat/completions" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d @request-fallback.json 2>>copilot-debug.log || echo -e "curl_error\n500")
+            
+            HTTP_CODE_FB=$(echo "$RESPONSE_FB" | tail -1)
+            BODY_FB=$(echo "$RESPONSE_FB" | sed '$d')
+            
+            echo "Fallback ${MODEL} HTTP Status: ${HTTP_CODE_FB}" >> copilot-debug.log
+            
+            if [ "$HTTP_CODE_FB" = "200" ]; then
+              echo "$BODY_FB" | jq -r '.choices[0].message.content' > "${{ inputs.output-file }}" 2>/dev/null || {
+                echo "# AI Security Scan Report" > "${{ inputs.output-file }}"
+                echo "" >> "${{ inputs.output-file }}"
+                echo "✅ **Scansione completata con ${MODEL}** ma errore nel parsing." >> "${{ inputs.output-file }}"
+                echo "" >> "${{ inputs.output-file }}"
+                echo "**Raw Response**:" >> "${{ inputs.output-file }}"
+                echo '```json' >> "${{ inputs.output-file }}"
+                echo "$BODY_FB" | head -50 >> "${{ inputs.output-file }}"
+                echo '```' >> "${{ inputs.output-file }}"
+              }
+              echo "✅ Report generato con successo usando ${MODEL}: ${{ inputs.output-file }}"
+              SUCCESS=true
+              break
+            else
+              echo "❌ Modello ${MODEL} fallito (HTTP ${HTTP_CODE_FB})" | tee -a copilot-debug.log
+              echo "Response ${MODEL}: ${BODY_FB}" >> copilot-debug.log
+            fi
+          done
           
-          HTTP_CODE2=$(echo "$RESPONSE2" | tail -1)
-          BODY2=$(echo "$RESPONSE2" | sed '$d')
-          
-          echo "Fallback HTTP Status: ${HTTP_CODE2}" >> copilot-debug.log
-          
-          if [ "$HTTP_CODE2" = "200" ]; then
-            echo "$BODY2" | jq -r '.choices[0].message.content' > "${{ inputs.output-file }}" 2>/dev/null || {
-              echo "# AI Security Scan Report" > "${{ inputs.output-file }}"
-              echo "" >> "${{ inputs.output-file }}"
-              echo "✅ **Scansione completata con gpt-3.5-turbo** ma errore nel parsing." >> "${{ inputs.output-file }}"
-              echo "" >> "${{ inputs.output-file }}"
-              echo "**Raw Response**:" >> "${{ inputs.output-file }}"
-              echo '```json' >> "${{ inputs.output-file }}"
-              echo "$BODY2" | head -50 >> "${{ inputs.output-file }}"
-              echo '```' >> "${{ inputs.output-file }}"
-            }
-            echo "✅ Report generato con successo usando gpt-3.5-turbo: ${{ inputs.output-file }}"
-          else
-            echo "❌ Anche il fallback ha fallito (HTTP ${HTTP_CODE2})" | tee -a copilot-debug.log
-            echo "Fallback Response: ${BODY2}" >> copilot-debug.log
+          if [ "$SUCCESS" = "false" ]; then
             echo "# AI Security Scan Report" > "${{ inputs.output-file }}"
             echo "" >> "${{ inputs.output-file }}"
-            echo "⚠️ Errore durante la scansione AI. Modelli testati: ${{ inputs.model }}, gpt-3.5-turbo." >> "${{ inputs.output-file }}"
+            echo "⚠️ **Nessun modello AI disponibile** per la scansione." >> "${{ inputs.output-file }}"
             echo "" >> "${{ inputs.output-file }}"
-            echo "**Status**: Failed" >> "${{ inputs.output-file }}"
+            echo "**Status**: No Models Available" >> "${{ inputs.output-file }}"
             echo "**Timestamp**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "${{ inputs.output-file }}"
-            echo "**Primary HTTP Code**: ${HTTP_CODE}" >> "${{ inputs.output-file }}"
-            echo "**Fallback HTTP Code**: ${HTTP_CODE2}" >> "${{ inputs.output-file }}"
+            echo "**Modelli testati**: ${{ inputs.model }}, ${FALLBACK_MODELS}" >> "${{ inputs.output-file }}"
+            echo "" >> "${{ inputs.output-file }}"
+            echo "**Possibili soluzioni**:" >> "${{ inputs.output-file }}"
+            echo "- Verifica che GitHub Models sia abilitato per l'organizzazione" >> "${{ inputs.output-file }}"
+            echo "- Controlla che il token abbia i permessi necessari" >> "${{ inputs.output-file }}"
+            echo "- Contatta l'amministratore GitHub per abilitare l'accesso AI" >> "${{ inputs.output-file }}"
           fi
           rm -f request-fallback.json 2>/dev/null || true
         else
