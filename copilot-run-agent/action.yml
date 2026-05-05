@@ -51,10 +51,10 @@ runs:
         # Crea directory output se non esiste
         mkdir -p "$(dirname "${{ inputs.output-file }}")"
         
-        # Esegui il comando copilot (usa explain invece di suggest --shell)
+        # Esegui il comando copilot in modalità non-interattiva con il flag -p
         {
-          echo "${{ inputs.task-prompt }}" | gh copilot explain 2>&1 || \
-          echo "${{ inputs.task-prompt }}" | gh copilot suggest 2>&1 || \
+          gh copilot explain -p "${{ inputs.task-prompt }}" 2>&1 || \
+          gh copilot suggest -p "${{ inputs.task-prompt }}" 2>&1 || \
           echo "⚠️ Copilot command failed"
         } > "${{ inputs.output-file }}"
         
