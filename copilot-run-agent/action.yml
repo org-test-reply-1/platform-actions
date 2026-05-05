@@ -51,10 +51,12 @@ runs:
         # Crea directory output se non esiste
         mkdir -p "$(dirname "${{ inputs.output-file }}")"
         
-        # Esegui il comando copilot
-        gh copilot suggest --shell << 'EOPROMPT' > "${{ inputs.output-file }}" 2>&1 || true
-        ${{ inputs.task-prompt }}
-        EOPROMPT
+        # Esegui il comando copilot (usa explain invece di suggest --shell)
+        {
+          echo "${{ inputs.task-prompt }}" | gh copilot explain 2>&1 || \
+          echo "${{ inputs.task-prompt }}" | gh copilot suggest 2>&1 || \
+          echo "⚠️ Copilot command failed"
+        } > "${{ inputs.output-file }}"
         
         # Verifica che l'output sia stato generato
         if [ ! -f "${{ inputs.output-file }}" ] || [ ! -s "${{ inputs.output-file }}" ]; then
@@ -65,6 +67,8 @@ runs:
           echo "" >> "${{ inputs.output-file }}"
           echo "**Status**: Incomplete" >> "${{ inputs.output-file }}"
           echo "**Timestamp**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "${{ inputs.output-file }}"
+          echo "" >> "${{ inputs.output-file }}"
+          echo "**Task Prompt**: ${{ inputs.task-prompt }}" >> "${{ inputs.output-file }}"
         fi
         
         echo "✅ Report generato: ${{ inputs.output-file }}"
