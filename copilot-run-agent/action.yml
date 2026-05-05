@@ -53,8 +53,7 @@ runs:
         
         # Esegui il comando copilot in modalità non-interattiva con il flag -p
         {
-          gh copilot explain -p "${{ inputs.task-prompt }}" 2>&1 || \
-          gh copilot suggest -p "${{ inputs.task-prompt }}" 2>&1 || \
+          gh copilot -p "${{ inputs.task-prompt }}" 2>&1 || \
           echo "⚠️ Copilot command failed"
         } > "${{ inputs.output-file }}"
         
