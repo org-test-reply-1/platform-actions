@@ -191,7 +191,7 @@ runs:
         fi
 
         # Cleanup
-        rm -f request.json 2>/dev/null || true
+        rm -f request.json system_prompt.txt user_prompt.txt 2>/dev/null || true
       env:
         GH_TOKEN: ${{ inputs.copilot-token }}
 
