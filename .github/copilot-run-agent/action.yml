@@ -1,0 +1,28 @@
+name: Copilot Run Agent
+description: 'Triggera Copilot su una issue per aprire una PR automatica'
+
+inputs:
+  issue-url:
+    description: 'URL della issue da assegnare a Copilot'
+    required: true
+  copilot-token:
+    description: 'Token GitHub con accesso a Copilot'
+    required: true
+  prompt:
+    description: 'Prompt da mandare a Copilot'
+    required: false
+    default: 'Analyze this issue, identify the root cause from the logs and open a PR with a fix.'
+
+runs:
+  using: composite
+  steps:
+    - name: Triggera Copilot sulla issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.copilot-token }}
+        ISSUE_URL: ${{ inputs.issue-url }}
+        PROMPT: ${{ inputs.prompt }}
+      run: |
+        echo "🤖 Triggerando Copilot sulla issue: ${ISSUE_URL}"
+        gh issue comment "${ISSUE_URL}" --body "@copilot ${PROMPT}"
+        echo "✅ Copilot triggerato"
