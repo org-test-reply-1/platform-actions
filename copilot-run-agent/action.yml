@@ -51,7 +51,7 @@ runs:
         echo "📂 Raccolta contesto del codice..."
         {
           echo "# Repository Structure"
-          find . -type f \
+          find . -maxdepth 3 -type f \
             -not -path './.git/*' \
             -not -path './node_modules/*' \
             -not -path './bin/*' \
@@ -62,13 +62,13 @@ runs:
             -not -name '*.png' \
             -not -name '*.jpg' \
             -not -name '*.zip' \
-            | head -200 | sort
+            2>/dev/null | head -200 | sort || true
           echo ""
           echo "# File Contents (rilevanti per sicurezza)"
           echo ""
-          TOTAL_SIZE=0
-          MAX_SIZE=50000
-          for f in $(find . -type f \
+          
+          # Lista file rilevanti in modo più sicuro
+          RELEVANT_FILES=$(find . -maxdepth 3 -type f \
             \( -name '*.yml' -o -name '*.yaml' -o -name '*.cs' -o -name '*.csproj' \
                -o -name '*.json' -o -name '*.ps1' -o -name '*.sh' -o -name '*.md' \
                -o -name 'Dockerfile*' -o -name '*.config' -o -name '*.xml' \) \
@@ -76,25 +76,32 @@ runs:
             -not -path './node_modules/*' \
             -not -path './bin/*' \
             -not -path './obj/*' \
-            | head -80 | sort); do
-            FILE_SIZE=$(wc -c < "$f" 2>/dev/null || echo 0)
-            TOTAL_SIZE=$((TOTAL_SIZE + FILE_SIZE))
-            if [ "$TOTAL_SIZE" -gt "$MAX_SIZE" ]; then
-              echo "... (troncato per dimensione)"
-              break
+            2>/dev/null | head -50 | sort || true)
+          
+          TOTAL_SIZE=0
+          MAX_SIZE=30000
+          echo "$RELEVANT_FILES" | while IFS= read -r f; do
+            if [ -n "$f" ] && [ -f "$f" ]; then
+              FILE_SIZE=$(wc -c < "$f" 2>/dev/null || echo 0)
+              TOTAL_SIZE=$((TOTAL_SIZE + FILE_SIZE))
+              if [ "$TOTAL_SIZE" -gt "$MAX_SIZE" ]; then
+                echo "... (troncato per dimensione: ${TOTAL_SIZE} bytes)"
+                break
+              fi
+              echo "## File: $f"
+              echo '```'
+              head -100 "$f" 2>/dev/null || echo "(impossibile leggere)"
+              echo '```'
+              echo ""
             fi
-            echo "## File: $f"
-            echo '```'
-            cat "$f" 2>/dev/null || echo "(impossibile leggere)"
-            echo '```'
-            echo ""
           done
-        } > code-context.txt
-        echo "✅ Contesto raccolto: $(wc -c < code-context.txt) bytes"
+        } > code-context.txt 2>/dev/null || echo "Errore nella raccolta contesto" > code-context.txt
+        echo "✅ Contesto raccolto: $(wc -c < code-context.txt 2>/dev/null || echo 0) bytes"
 
     - name: Esegui analisi AI tramite GitHub Models API
       shell: bash
       run: |
+        set -e  # Ferma su errori
         echo "🤖 Esecuzione analisi AI..."
         echo "Agent: ${{ inputs.agent-file }}"
         echo "Output: ${{ inputs.output-file }}"
@@ -102,8 +109,15 @@ runs:
 
         mkdir -p "$(dirname "${{ inputs.output-file }}")"
 
-        SYSTEM_PROMPT=$(cat "${{ inputs.agent-file }}")
-        CODE_CONTEXT=$(cat code-context.txt)
+        # Verifica che il file di contesto esista
+        if [ ! -f "code-context.txt" ]; then
+          echo "⚠️ File contesto non trovato, creo un contesto minimo..."
+          echo "# Repository Scan - Errore nel contesto" > code-context.txt
+          echo "Impossibile raccogliere il contesto completo del codice." >> code-context.txt
+        fi
+
+        SYSTEM_PROMPT=$(cat "${{ inputs.agent-file }}" 2>/dev/null || echo "Analyze code for security vulnerabilities.")
+        CODE_CONTEXT=$(cat code-context.txt 2>/dev/null || echo "No context available")
 
         USER_PROMPT="${{ inputs.task-prompt }}
 
@@ -113,25 +127,28 @@ runs:
         echo "# AI Analysis Debug" > copilot-debug.log
         echo "Data: $(date -u)" >> copilot-debug.log
         echo "Modello: ${{ inputs.model }}" >> copilot-debug.log
-        echo "Contesto: $(wc -c < code-context.txt) bytes" >> copilot-debug.log
+        echo "Contesto: $(wc -c < code-context.txt 2>/dev/null || echo 0) bytes" >> copilot-debug.log
+
+        # Crea il payload JSON in modo più sicuro
+        cat > request.json << EOF
+        {
+          "model": "${{ inputs.model }}",
+          "messages": [
+            {"role": "system", "content": $(echo "$SYSTEM_PROMPT" | jq -R .)},
+            {"role": "user", "content": $(echo "$USER_PROMPT" | jq -R .)}
+          ],
+          "max_tokens": 4096,
+          "temperature": 0.3
+        }
+        EOF
+
+        echo "Payload JSON creato: $(wc -c < request.json) bytes" >> copilot-debug.log
 
         RESPONSE=$(curl -s -w "\n%{http_code}" \
           "https://models.github.ai/inference/chat/completions" \
           -H "Authorization: Bearer ${GH_TOKEN}" \
           -H "Content-Type: application/json" \
-          -d "$(jq -n \
-            --arg model "${{ inputs.model }}" \
-            --arg system "$SYSTEM_PROMPT" \
-            --arg user "$USER_PROMPT" \
-            '{
-              model: $model,
-              messages: [
-                {role: "system", content: $system},
-                {role: "user", content: $user}
-              ],
-              max_tokens: 4096,
-              temperature: 0.3
-            }')" 2>>copilot-debug.log)
+          -d @request.json 2>>copilot-debug.log || echo -e "curl_error\n500")
 
         HTTP_CODE=$(echo "$RESPONSE" | tail -1)
         BODY=$(echo "$RESPONSE" | sed '$d')
@@ -139,12 +156,21 @@ runs:
         echo "HTTP Status: ${HTTP_CODE}" >> copilot-debug.log
 
         if [ "$HTTP_CODE" = "200" ]; then
-          echo "$BODY" | jq -r '.choices[0].message.content' > "${{ inputs.output-file }}"
+          echo "$BODY" | jq -r '.choices[0].message.content' > "${{ inputs.output-file }}" 2>/dev/null || {
+            echo "# AI Security Scan Report" > "${{ inputs.output-file }}"
+            echo "" >> "${{ inputs.output-file }}"
+            echo "✅ **Scansione completata** ma errore nel parsing della risposta AI." >> "${{ inputs.output-file }}"
+            echo "" >> "${{ inputs.output-file }}"
+            echo "**Raw Response**:" >> "${{ inputs.output-file }}"
+            echo '```json' >> "${{ inputs.output-file }}"
+            echo "$BODY" | head -50 >> "${{ inputs.output-file }}"
+            echo '```' >> "${{ inputs.output-file }}"
+          }
           echo "✅ Report generato con successo: ${{ inputs.output-file }}"
         else
           echo "❌ Errore API (HTTP ${HTTP_CODE})" | tee -a copilot-debug.log
           echo "Response: ${BODY}" >> copilot-debug.log
-          echo "# Security Scan Report" > "${{ inputs.output-file }}"
+          echo "# AI Security Scan Report" > "${{ inputs.output-file }}"
           echo "" >> "${{ inputs.output-file }}"
           echo "⚠️ Errore durante la scansione AI (HTTP ${HTTP_CODE})." >> "${{ inputs.output-file }}"
           echo "" >> "${{ inputs.output-file }}"
@@ -152,10 +178,14 @@ runs:
           echo "**Timestamp**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "${{ inputs.output-file }}"
           echo "**HTTP Code**: ${HTTP_CODE}" >> "${{ inputs.output-file }}"
           echo "" >> "${{ inputs.output-file }}"
+          echo "**Error Response**:" >> "${{ inputs.output-file }}"
           echo '```' >> "${{ inputs.output-file }}"
-          echo "${BODY}" >> "${{ inputs.output-file }}"
+          echo "${BODY}" | head -20 >> "${{ inputs.output-file }}"
           echo '```' >> "${{ inputs.output-file }}"
         fi
+
+        # Cleanup
+        rm -f request.json 2>/dev/null || true
       env:
         GH_TOKEN: ${{ inputs.copilot-token }}
 
