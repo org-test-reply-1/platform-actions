@@ -200,37 +200,52 @@ runs:
         echo "issue_number=${ISSUE_NUMBER}" >> $GITHUB_OUTPUT
         echo "✅ Issue creata: ${ISSUE_URL}"
 
-    - name: Assegna a @copilot (Coding Agent)
+    - name: Assegna Copilot Coding Agent via GraphQL
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.assign-pat }}
       run: |
         ISSUE_NUMBER="${{ steps.create-issue.outputs.issue_number }}"
-        REPO="${{ github.repository }}"
+        REPO_FULL="${{ github.repository }}"
+        OWNER=$(echo "$REPO_FULL" | cut -d'/' -f1)
+        REPO_NAME=$(echo "$REPO_FULL" | cut -d'/' -f2)
 
         if [ -z "$ISSUE_NUMBER" ]; then
           echo "⚠️ Numero issue non disponibile, skip assegnazione"
           exit 0
         fi
 
-        echo "🤖 Assegnazione issue #${ISSUE_NUMBER} a @copilot..."
+        echo "🤖 Assegnando Copilot alla issue #${ISSUE_NUMBER}..."
 
-        # Metodo 1: REST API per assegnare copilot (formato JSON corretto)
-        echo '{"assignees":["copilot"]}' | gh api "/repos/${REPO}/issues/${ISSUE_NUMBER}/assignees" \
-          --method POST \
-          --input - \
-          2>/dev/null && echo "✅ Issue #${ISSUE_NUMBER} assegnata a @copilot via REST API" || {
+        ISSUE_NODE_ID=$(gh api graphql -f query='
+          query($owner: String!, $repo: String!, $number: Int!) {
+            repository(owner: $owner, name: $repo) {
+              issue(number: $number) { id }
+            }
+          }' -f owner="$OWNER" -f repo="$REPO_NAME" -F number="$ISSUE_NUMBER" \
+          --jq '.data.repository.issue.id')
 
-          # Metodo 2: gh issue edit
-          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-assignee "copilot" 2>/dev/null && \
-            echo "✅ Issue #${ISSUE_NUMBER} assegnata a @copilot via gh issue edit" || {
+        COPILOT_ID=$(gh api graphql \
+          -H "GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection" \
+          -f query='
+          query($owner: String!, $repo: String!) {
+            repository(owner: $owner, name: $repo) {
+              suggestedActors(first: 10, capabilities: [CAN_BE_ASSIGNED]) {
+                nodes {
+                  login
+                  ... on Bot { id }
+                  ... on User { id }
+                }
+              }
+            }
+          }' -f owner="$OWNER" -f repo="$REPO_NAME" \
+          --jq '.data.repository.suggestedActors.nodes[] | select(.login == "copilot-swe-agent") | .id')
 
-            # Metodo 3: Aggiungi label 'copilot' per attivare il Coding Agent via label
-            gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-label "copilot" 2>/dev/null || true
-            echo "⚠️ Assegnazione diretta fallita — aggiunta label 'copilot' per attivare il Coding Agent"
-          }
-        }
-
+        gh api graphql \
+          -H "GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection" \
+          -f query="mutation { addAssigneesToAssignable(input: { assignableId: \"$ISSUE_NODE_ID\", assigneeIds: [\"$COPILOT_ID\"] }) { clientMutationId } }" \
+          && echo "  ✅ Copilot assegnato" \
+          || echo "  ⚠️ Errore assegnazione Copilot"
     - name: Summary
       shell: bash
       run: |
