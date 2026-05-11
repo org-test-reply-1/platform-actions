@@ -1,0 +1,20 @@
+name: Create Kubernetes Namespaces
+description: "Crea una lista di namespace Kubernetes se non esistono già"
+
+inputs:
+  namespaces:
+    description: "Lista di namespace da creare (separati da virgola)"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Crea namespace (se assenti)
+      shell: bash
+      run: |
+        IFS=',' read -ra NS_LIST <<< "${{ inputs.namespaces }}"
+        for ns in "${NS_LIST[@]}"; do
+          ns=$(echo "$ns" | xargs)
+          echo "Ensuring namespace: $ns"
+          kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
+        done
