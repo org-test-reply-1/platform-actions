@@ -133,8 +133,23 @@ runs:
       run: |
         git config user.name  "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git tag "v${{ steps.meta.outputs.version }}" || echo "Tag già esistente, skip"
-        git push origin "v${{ steps.meta.outputs.version }}" || echo "Push tag fallito, skip"
+        git fetch --tags --force
+
+        # Ricalcola il prossimo tag disponibile basandosi sui tag attuali
+        LAST_TAG=$(git tag --list 'v*.*.*' --sort=-version:refname | head -1)
+        if [ -z "$LAST_TAG" ]; then
+          NEXT_VERSION="0.1.0"
+        else
+          MAJOR=$(echo "$LAST_TAG" | sed 's/v\([0-9]*\)\..*/\1/')
+          MINOR=$(echo "$LAST_TAG" | sed 's/v[0-9]*\.\([0-9]*\)\..*/\1/')
+          PATCH=$(echo "$LAST_TAG" | sed 's/v[0-9]*\.[0-9]*\.\([0-9]*\).*/\1/')
+          PATCH=$((PATCH + 1))
+          NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+        fi
+
+        git tag "v${NEXT_VERSION}"
+        git push origin "v${NEXT_VERSION}"
+        echo "Tag creato: v${NEXT_VERSION}"
 
     # ------------------------------------------------------------------ #
     # 6. Summary
