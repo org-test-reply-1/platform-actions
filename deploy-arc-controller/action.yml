@@ -1,0 +1,30 @@
+name: Deploy ARC Controller
+description: "Installa/aggiorna il controller ARC via Helm"
+
+inputs:
+  arc_system_namespace:
+    description: "Namespace del controller ARC"
+    required: false
+    default: "arc-system"
+
+runs:
+  using: composite
+  steps:
+    - name: Helm upgrade arc-controller
+      shell: bash
+      run: |
+        # Se una release precedente è rimasta bloccata, la ripristiniamo
+        STATUS=$(helm status arc -n ${{ inputs.arc_system_namespace }} -o json 2>/dev/null | jq -r '.info.status' 2>/dev/null || echo "not-found")
+        if [ "$STATUS" = "pending-install" ] || [ "$STATUS" = "pending-upgrade" ] || [ "$STATUS" = "pending-rollback" ]; then
+          echo "⚠️  Release 'arc' in stato '$STATUS' — eseguo rollback..."
+          helm rollback arc 0 -n ${{ inputs.arc_system_namespace }} --wait --timeout 2m || \
+          helm uninstall arc -n ${{ inputs.arc_system_namespace }} --wait --timeout 2m || true
+        fi
+
+        helm upgrade arc \
+          --install \
+          --namespace ${{ inputs.arc_system_namespace }} \
+          --create-namespace \
+          oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+          --wait \
+          --timeout 5m

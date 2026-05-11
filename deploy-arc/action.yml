@@ -1,5 +1,5 @@
 name: Deploy ARC Runner Scale Set
-description: "Installa/aggiorna controller e runner scale set ARC, restart controller"
+description: "Installa/aggiorna il runner scale set ARC e restart del controller"
 
 inputs:
   arc_system_namespace:
@@ -23,21 +23,7 @@ runs:
   using: composite
   steps:
     # ---------------------------------------------------------------- #
-    # 1. Installa/aggiorna il controller ARC
-    # ---------------------------------------------------------------- #
-    - name: Helm upgrade arc-controller
-      shell: bash
-      run: |
-        helm upgrade arc \
-          --install \
-          --namespace ${{ inputs.arc_system_namespace }} \
-          --create-namespace \
-          oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
-          --wait \
-          --timeout 5m
-
-    # ---------------------------------------------------------------- #
-    # 3. Installa/aggiorna il runner scale set
+    # 1. Installa/aggiorna il runner scale set
     # ---------------------------------------------------------------- #
     - name: Helm upgrade arc-runner-set
       shell: bash
@@ -52,7 +38,7 @@ runs:
           --timeout 5m
 
     # ---------------------------------------------------------------- #
-    # 4. Restart controller
+    # 2. Restart controller
     # ---------------------------------------------------------------- #
     - name: Restart ARC controller
       shell: bash
