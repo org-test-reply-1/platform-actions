@@ -1,9 +1,9 @@
 name: Deploy ARC Controller
-description: "Installa/aggiorna il controller ARC via Helm"
+description: "Installs or upgrades the ARC controller via Helm"
 
 inputs:
   arc_system_namespace:
-    description: "Namespace del controller ARC"
+    description: "Namespace of the ARC controller"
     required: false
     default: "arc-system"
 
@@ -13,10 +13,10 @@ runs:
     - name: Helm upgrade arc-controller
       shell: bash
       run: |
-        # Se una release precedente è rimasta bloccata, la ripristiniamo
+        # If a previous release is stuck, roll it back first
         STATUS=$(helm status arc -n ${{ inputs.arc_system_namespace }} -o json 2>/dev/null | jq -r '.info.status' 2>/dev/null || echo "not-found")
         if [ "$STATUS" = "pending-install" ] || [ "$STATUS" = "pending-upgrade" ] || [ "$STATUS" = "pending-rollback" ]; then
-          echo "⚠️  Release 'arc' in stato '$STATUS' — eseguo rollback..."
+          echo "Release 'arc' is in state '$STATUS' - rolling back..."
           helm rollback arc 0 -n ${{ inputs.arc_system_namespace }} --wait --timeout 2m || \
           helm uninstall arc -n ${{ inputs.arc_system_namespace }} --wait --timeout 2m || true
         fi

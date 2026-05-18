@@ -1,6 +1,6 @@
 name: Docker Build & Push (ARC Runner)
 description: >
-  Costruisce e pubblica la custom runner image su GHCR con tag semver.
+  Builds and publishes the custom runner image to GHCR with semver tagging.
 
 inputs:
   registry:
@@ -9,11 +9,11 @@ inputs:
     default: "ghcr.io"
 
   image_name:
-    description: "Nome immagine (es: org/aks-arc-runner)"
+    description: "Image name (e.g. org/aks-arc-runner)"
     required: true
 
   version:
-    description: "Versione semver (es: 1.2.3). Se vuoto viene auto-incrementata la patch dall'ultima tag Git."
+    description: "Semver version (e.g. 1.2.3). If empty, the patch is auto-incremented from the latest Git tag."
     required: false
     default: ""
 
@@ -27,43 +27,43 @@ inputs:
 
 outputs:
   image_full_tag:
-    description: "Tag completo pubblicato (registry/image:tag)"
+    description: "Full published tag (registry/image:tag)"
     value: ${{ steps.meta.outputs.full_tag }}
 
   version:
-    description: "Versione semver usata (es: 1.2.3)"
+    description: "Semver version used (e.g. 1.2.3)"
     value: ${{ steps.meta.outputs.version }}
 
   image_digest:
-    description: "Digest SHA dell'immagine pubblicata"
+    description: "SHA digest of the published image"
     value: ${{ steps.push.outputs.digest }}
 
 runs:
   using: composite
   steps:
     # ------------------------------------------------------------------ #
-    # 1. Calcola versione semver
-    #    - Se l'input version è fornito, lo usa direttamente
-    #    - Altrimenti legge l'ultima tag Git (vX.Y.Z) e incrementa la patch
-    #    - Se non esistono tag, parte da 0.1.0
+    # 1. Calculate semver version
+    #    - If the version input is provided, use it directly
+    #    - Otherwise read the latest Git tag (vX.Y.Z) and increment patch
+    #    - If no tags exist, start at 0.1.0
     # ------------------------------------------------------------------ #
-    - name: Calcola versione semver
+    - name: Calculate semver version
       id: meta
       shell: bash
       run: |
         INPUT_VERSION="${{ inputs.version }}"
 
         if [ -n "$INPUT_VERSION" ]; then
-          # Usa la versione passata esplicitamente (strip del prefisso v se presente)
+          # Use explicitly provided version (strip v prefix if present)
           VERSION="${INPUT_VERSION#v}"
         else
-          # Leggi l'ultima tag Git semver
+          # Read the latest Git semver tag
           LAST_TAG=$(git tag --list 'v*.*.*' --sort=-version:refname | head -1)
 
           if [ -z "$LAST_TAG" ]; then
             VERSION="0.1.0"
           else
-            # Estrai major minor patch e incrementa patch
+            # Extract major, minor, patch and increment patch
             MAJOR=$(echo "$LAST_TAG" | sed 's/v\([0-9]*\)\..*/\1/')
             MINOR=$(echo "$LAST_TAG" | sed 's/v[0-9]*\.\([0-9]*\)\..*/\1/')
             PATCH=$(echo "$LAST_TAG" | sed 's/v[0-9]*\.[0-9]*\.\([0-9]*\).*/\1/')
@@ -78,13 +78,13 @@ runs:
         echo "version=${VERSION}"       >> "$GITHUB_OUTPUT"
         echo "full_tag=${FULL}"         >> "$GITHUB_OUTPUT"
         echo "full_latest=${FULL_LATEST}" >> "$GITHUB_OUTPUT"
-        echo "Versione: ${VERSION}"
+        echo "Version: ${VERSION}"
         echo "Tag: ${FULL}"
 
     # ------------------------------------------------------------------ #
-    # 2. Login a GHCR
+    # 2. Login to GHCR
     # ------------------------------------------------------------------ #
-    - name: Login a ghcr.io
+    - name: Login to ghcr.io
       shell: bash
       run: |
         echo "${{ github.token }}" | docker login ghcr.io \
@@ -92,7 +92,7 @@ runs:
           --password-stdin
 
     # ------------------------------------------------------------------ #
-    # 3. Build — tagga sia versione che latest
+    # 3. Build - tag both version and latest
     # ------------------------------------------------------------------ #
     - name: Docker build
       shell: bash
@@ -108,7 +108,7 @@ runs:
           ${{ inputs.context_path }}
 
     # ------------------------------------------------------------------ #
-    # 4. Push — pusha sia versione che latest
+    # 4. Push - push both version and latest
     # ------------------------------------------------------------------ #
     - name: Docker push
       id: push
@@ -126,30 +126,18 @@ runs:
         echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
 
     # ------------------------------------------------------------------ #
-    # 5. Crea tag Git per la versione pushata
+    # 5. Create Git tag for the pushed version
     # ------------------------------------------------------------------ #
-    - name: Crea tag Git
+    - name: Create Git tag
       shell: bash
       run: |
         git config user.name  "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git fetch --tags --force
 
-        # Ricalcola il prossimo tag disponibile basandosi sui tag attuali
-        LAST_TAG=$(git tag --list 'v*.*.*' --sort=-version:refname | head -1)
-        if [ -z "$LAST_TAG" ]; then
-          NEXT_VERSION="0.1.0"
-        else
-          MAJOR=$(echo "$LAST_TAG" | sed 's/v\([0-9]*\)\..*/\1/')
-          MINOR=$(echo "$LAST_TAG" | sed 's/v[0-9]*\.\([0-9]*\)\..*/\1/')
-          PATCH=$(echo "$LAST_TAG" | sed 's/v[0-9]*\.[0-9]*\.\([0-9]*\).*/\1/')
-          PATCH=$((PATCH + 1))
-          NEXT_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-        fi
-
-        git tag "v${NEXT_VERSION}"
-        git push origin "v${NEXT_VERSION}"
-        echo "Tag creato: v${NEXT_VERSION}"
+        git tag "v${{ steps.meta.outputs.version }}"
+        git push origin "v${{ steps.meta.outputs.version }}"
+        echo "Tag created: v${{ steps.meta.outputs.version }}"
 
     # ------------------------------------------------------------------ #
     # 6. Summary
@@ -157,11 +145,11 @@ runs:
     - name: Summary
       shell: bash
       run: |
-        echo "### Docker Build & Push completato" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Campo | Valore |" >> "$GITHUB_STEP_SUMMARY"
+        echo "### Docker Build & Push complete" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
         echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Versione | \`${{ steps.meta.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
-        echo "| Immagine | \`${{ steps.meta.outputs.full_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Version | \`${{ steps.meta.outputs.version }}\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Image | \`${{ steps.meta.outputs.full_tag }}\` |" >> "$GITHUB_STEP_SUMMARY"
         echo "| Latest | \`${{ steps.meta.outputs.full_latest }}\` |" >> "$GITHUB_STEP_SUMMARY"
         echo "| Digest | \`${{ steps.push.outputs.digest }}\` |" >> "$GITHUB_STEP_SUMMARY"
         echo "| Commit | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"

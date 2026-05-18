@@ -1,67 +1,67 @@
 name: Copilot Run Agent
-description: 'Crea una issue di scan AI e la assegna al Coding Agent (@copilot) per analisi completa del codice'
+description: 'Creates an AI scan issue and assigns it to the Coding Agent for a full code analysis'
 
 inputs:
   task-prompt:
-    description: 'Prompt dettagliato per il Coding Agent'
+    description: 'Detailed prompt for the Coding Agent'
     required: false
     default: |
-      ## 🔍 Analisi completa del codice sorgente
+      ## Full source code analysis
 
-      Scansiona **tutto** il codice sorgente di questa repository, inclusi:
-      - Workflow e pipeline CI/CD (`.github/workflows/`)
-      - Script (PowerShell, Bash)
-      - Dockerfile e configurazioni container
-      - Codice applicativo (.cs, .csproj, .json, .xml, .config)
-      - File di configurazione e secrets management
+      Scan **all** source code in this repository, including:
+      - CI/CD workflows and pipelines (`.github/workflows/`)
+      - Scripts (PowerShell, Bash)
+      - Dockerfiles and container configuration
+      - Application code (.cs, .csproj, .json, .xml, .config)
+      - Configuration files and secrets management
 
-      ### Obiettivi dell'analisi:
-      1. **Sicurezza**: identifica vulnerabilità, secrets hardcoded, injection, misconfiguration
-      2. **Qualità del codice**: code smells, duplicazioni, complessità eccessiva
-      3. **Best practices**: pattern mancanti, configurazioni non ottimali
-      4. **Pipeline**: problemi nei workflow, permessi eccessivi, mancanza di validazioni
+      ### Analysis objectives:
+      1. **Security**: vulnerabilities, hardcoded secrets, injection, misconfiguration
+      2. **Code quality**: code smells, duplication, excessive complexity
+      3. **Best practices**: missing patterns, suboptimal configurations
+      4. **Pipeline**: workflow issues, excessive permissions, missing validations
 
-      ### Output richiesto:
-      - Report dettagliato con severity (CRITICAL, HIGH, MEDIUM, LOW)
-      - Per ogni problema: descrizione, file interessato, linea (se possibile), fix suggerito
-      - Proponi **UNA SOLA Pull Request** con tutti i fix per i problemi di sicurezza CRITICAL e HIGH
-      - La PR deve referenziare questa issue con "Closes #NUMERO" nel body
-      - Includi un sommario della qualità complessiva del codice
-      - NON creare issue o PR multiple: tutto in una singola PR collegata a questa issue
+      ### Expected output:
+      - Detailed report with severity levels (CRITICAL, HIGH, MEDIUM, LOW)
+      - For each issue: description, affected file, line number (where possible), suggested fix
+      - Propose **ONE single Pull Request** with all fixes for CRITICAL and HIGH security issues
+      - The PR must reference this issue with "Closes #NUMBER" in the body
+      - Include an overall code quality summary
+      - Do NOT create multiple issues or PRs: everything in a single PR linked to this issue
   scan-paths:
-    description: 'Path da scansionare (default: tutto il repo)'
+    description: 'Paths to scan (default: entire repository)'
     required: false
     default: '.'
   issue-title:
-    description: 'Titolo della issue'
+    description: 'Issue title'
     required: false
-    default: '🤖 AI Security & Quality Scan'
+    default: 'AI Security & Quality Scan'
   labels:
-    description: 'Labels per la issue (comma-separated)'
+    description: 'Labels for the issue (comma-separated)'
     required: false
     default: 'copilot-auto,security,code-quality'
   assign-pat:
-    description: 'PAT fine-grained con Issues Read/Write e Contents Read/Write'
+    description: 'Fine-grained PAT with Issues Read/Write and Contents Read/Write'
     required: true
 
 outputs:
   issue-url:
-    description: 'URL della issue creata'
+    description: 'URL of the created issue'
     value: ${{ steps.create-issue.outputs.issue_url }}
   issue-number:
-    description: 'Numero della issue creata'
+    description: 'Number of the created issue'
     value: ${{ steps.create-issue.outputs.issue_number }}
 
 runs:
   using: composite
   steps:
-    - name: Raccogli struttura repository
+    - name: Collect repository structure
       id: context
       shell: bash
       run: |
-        echo "📂 Raccolta struttura repository per contesto issue..."
+        echo "Collecting repository structure for issue context..."
         {
-          echo "## 📁 Struttura Repository"
+          echo "## Repository Structure"
           echo '```'
           find ${{ inputs.scan-paths }} -maxdepth 4 -type f \
             -not -path './.git/*' \
@@ -74,15 +74,15 @@ runs:
             2>/dev/null | sort | head -150 || true
           echo '```'
           echo ""
-          echo "## 📊 Statistiche"
-          echo "- **File totali**: $(find ${{ inputs.scan-paths }} -type f -not -path './.git/*' 2>/dev/null | wc -l)"
-          echo "- **Workflow YAML**: $(find . -name '*.yml' -o -name '*.yaml' | grep -v '.git' | wc -l)"
+          echo "## Statistics"
+          echo "- **Total files**: $(find ${{ inputs.scan-paths }} -type f -not -path './.git/*' 2>/dev/null | wc -l)"
+          echo "- **YAML workflows**: $(find . -name '*.yml' -o -name '*.yaml' | grep -v '.git' | wc -l)"
           echo "- **Dockerfile**: $(find . -name 'Dockerfile*' | wc -l)"
-          echo "- **Script**: $(find . \( -name '*.ps1' -o -name '*.sh' \) | grep -v '.git' | wc -l)"
-          echo "- **Codice .NET**: $(find . -name '*.cs' -o -name '*.csproj' | wc -l)"
-        } > repo-structure.md 2>/dev/null || echo "Errore raccolta struttura" > repo-structure.md
+          echo "- **Scripts**: $(find . \( -name '*.ps1' -o -name '*.sh' \) | grep -v '.git' | wc -l)"
+          echo "- **.NET code**: $(find . -name '*.cs' -o -name '*.csproj' | wc -l)"
+        } > repo-structure.md 2>/dev/null || echo "Error collecting structure" > repo-structure.md
 
-    - name: Crea issue per Coding Agent
+    - name: Create issue for Coding Agent
       id: create-issue
       shell: bash
       env:
@@ -92,17 +92,17 @@ runs:
         TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
         ISSUE_TITLE="${{ inputs.issue-title }}"
 
-        # Controlla se esiste già una issue aperta con lo stesso titolo (1 issue per repo)
+        # Check if an open issue with the same title already exists (one issue per repo)
         EXISTING_ISSUE=$(gh issue list --repo "$REPO" --state open --label "copilot-auto" \
           --search "$ISSUE_TITLE" --json number,url --jq '.[0]' 2>/dev/null || echo "")
 
         if [ -n "$EXISTING_ISSUE" ] && [ "$EXISTING_ISSUE" != "null" ]; then
           EXISTING_NUMBER=$(echo "$EXISTING_ISSUE" | jq -r '.number')
           EXISTING_URL=$(echo "$EXISTING_ISSUE" | jq -r '.url')
-          echo "⚠️ Issue già esistente: #${EXISTING_NUMBER} (${EXISTING_URL})"
-          echo "Aggiorno la issue esistente con il nuovo contesto..."
+          echo "Existing issue found: #${EXISTING_NUMBER} (${EXISTING_URL})"
+          echo "Updating existing issue with new context..."
 
-          # Aggiorna il body della issue esistente
+          # Update the body of the existing issue
           cat > issue-body.md << 'EOF'
         ${{ inputs.task-prompt }}
         EOF
@@ -111,13 +111,13 @@ runs:
 
         ---
 
-        ### 📋 Contesto automatico (aggiornato)
+        ### Automatic context (updated)
 
         **Repository**: ${REPO}
         **Branch**: ${{ github.ref_name }}
         **Commit**: ${{ github.sha }}
         **Timestamp**: ${TIMESTAMP}
-        **Trigger**: Pipeline AI Security Scan (aggiornamento)
+        **Trigger**: AI Security Scan Pipeline (update)
 
         EOF
 
@@ -127,22 +127,22 @@ runs:
 
         ---
 
-        ### ⚡ Azioni richieste al Coding Agent:
-        1. Analizza tutto il codice sorgente della repository
-        2. Genera un report dettagliato con le criticità trovate
-        3. **Apri UNA SOLA Pull Request** collegata a questa issue con i fix per i problemi CRITICAL e HIGH
-        4. Commenta questa issue con il report completo
-        5. La PR deve referenziare questa issue con "Closes #NUMERO" nel body
+        ### Actions required from the Coding Agent:
+        1. Analyze all source code in the repository
+        2. Generate a detailed report of issues found
+        3. **Open ONE Pull Request** linked to this issue with fixes for CRITICAL and HIGH issues
+        4. Comment on this issue with the full report
+        5. The PR must reference this issue with "Closes #NUMBER" in the body
         EOF
 
           gh issue edit "$EXISTING_NUMBER" --repo "$REPO" --body-file issue-body.md 2>/dev/null || true
           echo "issue_url=${EXISTING_URL}" >> $GITHUB_OUTPUT
           echo "issue_number=${EXISTING_NUMBER}" >> $GITHUB_OUTPUT
-          echo "✅ Issue esistente aggiornata: ${EXISTING_URL}"
+          echo "Existing issue updated: ${EXISTING_URL}"
           exit 0
         fi
 
-        # Costruisci il body della nuova issue
+        # Build the body for the new issue
         cat > issue-body.md << 'EOF'
         ${{ inputs.task-prompt }}
         EOF
@@ -151,13 +151,13 @@ runs:
 
         ---
 
-        ### 📋 Contesto automatico
+        ### Automatic context
 
         **Repository**: ${REPO}
         **Branch**: ${{ github.ref_name }}
         **Commit**: ${{ github.sha }}
         **Timestamp**: ${TIMESTAMP}
-        **Trigger**: Pipeline AI Security Scan
+        **Trigger**: AI Security Scan Pipeline
 
         EOF
 
@@ -167,21 +167,21 @@ runs:
 
         ---
 
-        ### ⚡ Azioni richieste al Coding Agent:
-        1. Analizza tutto il codice sorgente della repository
-        2. Genera un report dettagliato con le criticità trovate
-        3. **Apri UNA SOLA Pull Request** collegata a questa issue con i fix per i problemi CRITICAL e HIGH
-        4. Commenta questa issue con il report completo
-        5. La PR deve referenziare questa issue con "Closes #NUMERO" nel body
+        ### Actions required from the Coding Agent:
+        1. Analyze all source code in the repository
+        2. Generate a detailed report of issues found
+        3. **Open ONE Pull Request** linked to this issue with fixes for CRITICAL and HIGH issues
+        4. Comment on this issue with the full report
+        5. The PR must reference this issue with "Closes #NUMBER" in the body
         EOF
 
-        # Crea la issue (costruisci i flag --label separati)
+        # Create the issue (build --label flags separately)
         LABEL_FLAGS=""
         IFS=',' read -ra LABEL_ARRAY <<< "${{ inputs.labels }}"
         for lbl in "${LABEL_ARRAY[@]}"; do
           lbl=$(echo "$lbl" | xargs)  # trim whitespace
           if [ -n "$lbl" ]; then
-            # Crea la label se non esiste
+            # Create the label if it does not exist
             gh label create "$lbl" --repo "$REPO" --color "ededed" 2>/dev/null || true
             LABEL_FLAGS="${LABEL_FLAGS} --label ${lbl}"
           fi
@@ -195,12 +195,12 @@ runs:
 
         echo "issue_url=${ISSUE_URL}" >> $GITHUB_OUTPUT
 
-        # Estrai numero issue
+        # Extract issue number from URL
         ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oP '/issues/\K[0-9]+' || echo "")
         echo "issue_number=${ISSUE_NUMBER}" >> $GITHUB_OUTPUT
-        echo "✅ Issue creata: ${ISSUE_URL}"
+        echo "Issue created: ${ISSUE_URL}"
 
-    - name: Assegna Copilot Coding Agent via GraphQL
+    - name: Assign Copilot Coding Agent via GraphQL
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.assign-pat }}
@@ -211,11 +211,11 @@ runs:
         REPO_NAME=$(echo "$REPO_FULL" | cut -d'/' -f2)
 
         if [ -z "$ISSUE_NUMBER" ]; then
-          echo "⚠️ Numero issue non disponibile, skip assegnazione"
+          echo "Issue number not available, skipping assignment"
           exit 0
         fi
 
-        echo "🤖 Assegnando Copilot alla issue #${ISSUE_NUMBER}..."
+        echo "Assigning Copilot to issue #${ISSUE_NUMBER}..."
 
         ISSUE_NODE_ID=$(gh api graphql -f query='
           query($owner: String!, $repo: String!, $number: Int!) {
@@ -244,24 +244,24 @@ runs:
         gh api graphql \
           -H "GraphQL-Features: issues_copilot_assignment_api_support,coding_agent_model_selection" \
           -f query="mutation { addAssigneesToAssignable(input: { assignableId: \"$ISSUE_NODE_ID\", assigneeIds: [\"$COPILOT_ID\"] }) { clientMutationId } }" \
-          && echo "  ✅ Copilot assegnato" \
-          || echo "  ⚠️ Errore assegnazione Copilot"
+          && echo "  Copilot assigned" \
+          || echo "  Error assigning Copilot"
     - name: Summary
       shell: bash
       run: |
-        echo "## 🤖 AI Security & Quality Scan" >> $GITHUB_STEP_SUMMARY
+        echo "## AI Security & Quality Scan" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "✅ **Issue creata e assegnata al Coding Agent**" >> $GITHUB_STEP_SUMMARY
+        echo "**Issue created and assigned to Coding Agent**" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| Campo | Valore |" >> $GITHUB_STEP_SUMMARY
+        echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
         echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
         echo "| Issue | ${{ steps.create-issue.outputs.issue_url }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Numero | #${{ steps.create-issue.outputs.issue_number }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Assegnata a | @copilot |" >> $GITHUB_STEP_SUMMARY
+        echo "| Number | #${{ steps.create-issue.outputs.issue_number }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Assigned to | @copilot |" >> $GITHUB_STEP_SUMMARY
         echo "| Repository | ${{ github.repository }} |" >> $GITHUB_STEP_SUMMARY
         echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### ⏳ Prossimi passi (automatici)" >> $GITHUB_STEP_SUMMARY
-        echo "1. Il Coding Agent analizzerà il codice sorgente" >> $GITHUB_STEP_SUMMARY
-        echo "2. Commenterà la issue con il report" >> $GITHUB_STEP_SUMMARY
-        echo "3. Aprirà una PR con i fix per problemi CRITICAL/HIGH" >> $GITHUB_STEP_SUMMARY
+        echo "### Next steps (automated)" >> $GITHUB_STEP_SUMMARY
+        echo "1. The Coding Agent will analyze the source code" >> $GITHUB_STEP_SUMMARY
+        echo "2. It will comment on the issue with the report" >> $GITHUB_STEP_SUMMARY
+        echo "3. It will open a PR with fixes for CRITICAL/HIGH issues" >> $GITHUB_STEP_SUMMARY

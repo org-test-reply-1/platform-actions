@@ -1,29 +1,29 @@
 name: Notify Teams
-description: 'Manda una notifica su Microsoft Teams'
+description: 'Sends a notification to Microsoft Teams'
 
 inputs:
   webhook-url:
-    description: 'URL del webhook di Teams'
+    description: 'Teams webhook URL'
     required: true
   title:
-    description: 'Titolo del messaggio'
+    description: 'Message title'
     required: true
   message:
-    description: 'Corpo del messaggio'
+    description: 'Message body'
     required: true
   color:
-    description: 'Colore del messaggio (green, red, orange)'
+    description: 'Message color (green, red, orange)'
     required: false
     default: 'green'
   attachment:
-    description: 'Testo aggiuntivo da mandare come secondo messaggio'
+    description: 'Additional text sent as a second message'
     required: false
     default: ''
 
 runs:
   using: composite
   steps:
-    - name: Manda notifica Teams
+    - name: Send Teams notification
       shell: bash
       env:
         WEBHOOK_URL: ${{ inputs.webhook-url }}
@@ -37,7 +37,7 @@ runs:
           *)      COLOR="00FF00" ;;
         esac
 
-        # Escape per JSON
+        # Escape for JSON
         TITLE_ESC=$(echo "$TITLE" | sed 's/"/\\"/g')
         MESSAGE_ESC=$(echo "$MESSAGE" | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
 
@@ -84,7 +84,7 @@ runs:
                   \"body\": [
                     {
                       \"type\": \"TextBlock\",
-                      \"text\": \"📄 Summary dettagliato\",
+                      \"text\": \"Detailed summary\",
                       \"weight\": \"Bolder\"
                     },
                     {

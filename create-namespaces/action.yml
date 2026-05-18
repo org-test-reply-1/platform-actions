@@ -1,15 +1,15 @@
 name: Create Kubernetes Namespaces
-description: "Crea una lista di namespace Kubernetes se non esistono già"
+description: "Creates a list of Kubernetes namespaces if they do not already exist"
 
 inputs:
   namespaces:
-    description: "Lista di namespace da creare (separati da virgola)"
+    description: "Comma-separated list of namespaces to create"
     required: true
 
 runs:
   using: composite
   steps:
-    - name: Crea namespace (se assenti)
+    - name: Create namespaces (if absent)
       shell: bash
       run: |
         IFS=',' read -ra NS_LIST <<< "${{ inputs.namespaces }}"

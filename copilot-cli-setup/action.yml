@@ -1,25 +1,25 @@
 name: Copilot CLI Setup
-description: 'Installa e configura GitHub Copilot CLI'
+description: 'Installs and configures GitHub Copilot CLI'
 
 inputs:
   copilot-token:
-    description: 'Token GitHub con accesso a Copilot'
+    description: 'GitHub token with Copilot access'
     required: true
 
 runs:
   using: composite
   steps:
-    - name: Installa GitHub Copilot extension
+    - name: Install GitHub Copilot extension
       shell: bash
       run: |
         gh extension install github/gh-copilot 2>/dev/null || true
       env:
         GH_TOKEN: ${{ inputs.copilot-token }}
 
-    - name: Verifica installazione
+    - name: Verify installation
       shell: bash
       run: |
-        echo "Copilot CLI setup completato"
-        gh copilot --version 2>/dev/null || echo "Versione non disponibile"
+        echo "Copilot CLI setup complete"
+        gh copilot --version 2>/dev/null || echo "Version not available"
       env:
         GH_TOKEN: ${{ inputs.copilot-token }}

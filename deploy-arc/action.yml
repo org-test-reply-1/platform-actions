@@ -1,21 +1,21 @@
 name: Deploy ARC Runner Scale Set
-description: "Installa/aggiorna il runner scale set ARC e restart del controller"
+description: "Installs or upgrades the ARC runner scale set and restarts the controller"
 
 inputs:
   arc_system_namespace:
-    description: "Namespace del controller ARC"
+    description: "Namespace of the ARC controller"
     required: false
     default: "arc-system"
   arc_namespace:
-    description: "Namespace Kubernetes dei runner"
+    description: "Kubernetes namespace for the runners"
     required: false
     default: "arc-runners"
   arc_runner_set_name:
-    description: "Nome dell'installazione Helm del runner scale set"
+    description: "Helm release name of the runner scale set"
     required: false
     default: "arc-runner-set"
   values_yaml_path:
-    description: "Percorso del values.yaml per il runner scale set"
+    description: "Path to the values.yaml for the runner scale set"
     required: false
     default: "./arc-runner-image/values.yaml"
 
@@ -23,7 +23,7 @@ runs:
   using: composite
   steps:
     # ---------------------------------------------------------------- #
-    # 1. Installa/aggiorna il runner scale set
+    # 1. Install or upgrade the runner scale set
     # ---------------------------------------------------------------- #
     - name: Helm upgrade arc-runner-set
       shell: bash
