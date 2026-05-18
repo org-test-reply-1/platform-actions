@@ -51,6 +51,9 @@ outputs:
   issue-number:
     description: 'Number of the created issue'
     value: ${{ steps.create-issue.outputs.issue_number }}
+  is-new:
+    description: 'true if a new issue was created, false if an existing one was updated'
+    value: ${{ steps.create-issue.outputs.is_new }}
 
 runs:
   using: composite
@@ -138,6 +141,7 @@ runs:
           gh issue edit "$EXISTING_NUMBER" --repo "$REPO" --body-file issue-body.md 2>/dev/null || true
           echo "issue_url=${EXISTING_URL}" >> $GITHUB_OUTPUT
           echo "issue_number=${EXISTING_NUMBER}" >> $GITHUB_OUTPUT
+          echo "is_new=false" >> $GITHUB_OUTPUT
           echo "Existing issue updated: ${EXISTING_URL}"
           exit 0
         fi
@@ -198,9 +202,11 @@ runs:
         # Extract issue number from URL
         ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oP '/issues/\K[0-9]+' || echo "")
         echo "issue_number=${ISSUE_NUMBER}" >> $GITHUB_OUTPUT
+        echo "is_new=true" >> $GITHUB_OUTPUT
         echo "Issue created: ${ISSUE_URL}"
 
     - name: Assign Copilot Coding Agent via GraphQL
+      if: steps.create-issue.outputs.is_new == 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.assign-pat }}
