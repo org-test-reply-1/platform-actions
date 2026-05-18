@@ -1,0 +1,47 @@
+name: React Vite Build & Test
+description: 'Builds and tests a React Vite application'
+
+inputs:
+  node-version:
+    description: 'Node.js version to use'
+    required: false
+    default: '20'
+
+outputs:
+  build-path:
+    description: 'Path to the build output'
+    value: ${{ steps.build.outputs.build-path }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Set environment variables
+      shell: bash
+      run: mv .env.example .env
+
+    - name: Install dependencies
+      shell: bash
+      run: yarn install --frozen-lockfile
+
+    - name: Build application
+      id: build
+      shell: bash
+      run: |
+        yarn build
+        echo "build-path=dist" >> $GITHUB_OUTPUT
+
+    - name: Run tests
+      shell: bash
+      run: yarn test
+
+    - name: Run linter
+      shell: bash
+      run: yarn lint
+
+    - name: Check types
+      shell: bash
+      run: yarn check-types
