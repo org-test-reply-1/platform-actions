@@ -1,0 +1,50 @@
+name: Vercel Deploy
+description: 'Builds and deploys a React Vite application to Vercel'
+
+inputs:
+  node-version:
+    description: 'Node.js version to use'
+    required: false
+    default: '20'
+  vercel-token:
+    description: 'Vercel authentication token'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Set environment variables
+      shell: bash
+      run: mv .env.example .env
+
+    - name: Install dependencies
+      shell: bash
+      run: yarn install
+
+    - name: Build application
+      shell: bash
+      run: yarn build
+
+    - name: Run tests
+      shell: bash
+      run: yarn test
+
+    - name: Run linter
+      shell: bash
+      run: yarn lint
+
+    - name: Check types
+      shell: bash
+      run: yarn check-types
+
+    - name: Deploy to Vercel
+      shell: bash
+      env:
+        VERCEL_TOKEN: ${{ inputs.vercel-token }}
+      run: |
+        npm install -g vercel
+        vercel --token $VERCEL_TOKEN --prod --yes
